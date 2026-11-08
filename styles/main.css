@@ -1277,7 +1277,6 @@ svg.ui-icon[data-icon="brand"] { stroke-width: 1.9 !important; }
 .msg.ai .bubble[dir="rtl"] + .reply-actions { justify-content: flex-end; }
 
 /* An interrupted network reply stays visible, but is never labeled complete. */
-.reply-notice { margin-top: 12px; color: var(--text-secondary); font-family: var(--font-main); font-size: 13px; line-height: 20px; }
 /* Streaming/final rerenders must not replay an opacity-zero entrance. */
 .msg.ai { animation: none; }
 
@@ -1327,8 +1326,6 @@ svg.ui-icon[data-icon="brand"] { stroke-width: 1.9 !important; }
 .continue-reply:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .stream-code-preview { font: 13px/20px monospace; white-space: pre-wrap; overflow-wrap: anywhere; max-width: 100%; background: var(--bg-code); padding: 12px; border-radius: 12px; }
 
-.reply-notice { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; }
-.reply-notice .continue-reply { margin: 0; }
 
 /* Screen-reader instructions only; no visual layout/theme changes. */
 .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }

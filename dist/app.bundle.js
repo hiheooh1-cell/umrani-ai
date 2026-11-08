@@ -20,9 +20,10 @@ const GEMINI_CHAT_COMPLETIONS_URL = "https://generativelanguage.googleapis.com/v
 // src/config/config.js
 const APP_NAME = "Umrani AI";
 // Master switch for ALL ads in the app (Native Banner + between-reply ad
-// breaks). true = ads show (default). false = no ad script is loaded, the
+// breaks). true = ads show. false = no ad script is loaded, the
 // ad shell is removed from the page, and no ad break ever runs. This is a
 // code option only; there is no in-app toggle. Rebuild after changing it.
+// Shipped as false: the live deployment runs with ads off (Fahad's order).
 const ADS_ENABLED = false;
 
 // User-requested browser credentials. Every visitor can inspect/copy these keys.
@@ -1666,13 +1667,9 @@ function buildMessageEl(msg, chatOwner = null) {
 
   wrap.appendChild(bubble);
   if (msg.role !== USER_ROLE) {
-    if (msg.incomplete) {
-      const notice = document.createElement("p");
-      notice.className = "reply-notice";
-      notice.setAttribute("role", "status");
-      notice.textContent = "Reply interrupted. Use Regenerate to try again.";
-      wrap.appendChild(notice);
-    }
+    // No failure labels are ever attached to a reply: a stream that
+    // drops mid-way is retried silently (see streamCompletion), and a
+    // preserved partial reply renders as an ordinary message.
     const activeOwner = chatOwner || getChat(state.currentChatId);
     const owner = activeOwner && (chatOwner || activeOwner.messages.includes(msg)) ? activeOwner : null;
     wrap.appendChild(createReplyActions({
@@ -2601,12 +2598,11 @@ async function sendMessage(options = {}) {
     const content = collapseRepeatedResponse(rawContent) ||
       cleanFinalResponse(rawContent) || rawContent;
     assistantMsg.content = content || "No response.";
-    if (res.incomplete) assistantMsg.incomplete = true;
-    if (regenerate && res.incomplete) {
-      // Regeneration must not replace a complete original with a failed attempt.
-      const interrupted = new Error("Regeneration was interrupted.");
-      interrupted.userMessage = "Regeneration was interrupted. Your previous reply was kept.";
-      throw interrupted;
+    if (regenerate && res.partial) {
+      // Regeneration must not replace a complete original with a partial
+      // attempt whose automatic retries all failed. Throwing here lands
+      // in the catch below, which silently restores the original reply.
+      throw new Error("Regeneration did not complete.");
     }
     if (regenerate) chat.messages.splice(chat.messages.indexOf(regenerationTarget), 1);
     chat.updatedAt = Date.now();
@@ -2743,6 +2739,16 @@ function streamCompletion(apiMessages) {
   return (async () => {
     let lastErr = null;
     const tried = [];
+    // Silent recovery from a mid-stream drop: when a stream fails AFTER
+    // answer text arrived, the partial text is kept safe here and the
+    // fallback chain automatically retries the request (up to
+    // MAX_PARTIAL_RETRIES times across both provider tiers). No error
+    // or "interrupted" notice is ever shown to the user; if every
+    // automatic attempt fails, the longest partial reply is kept as an
+    // ordinary message with no label attached.
+    const MAX_PARTIAL_RETRIES = 2;
+    let partialContent = "";
+    let partialRetries = 0;
 
     // One pass over a model list × a provider list. Resolves with the reply
     // (or a preserved partial reply) on the first success, or with null when
@@ -2754,8 +2760,10 @@ function streamCompletion(apiMessages) {
           if (!getProviderModels(provider).includes(model)) continue;
           tried.push(provider.name + " / " + model);
 
-          // Fallback is allowed only before any answer text is received.
-          // Clear empty/pre-answer UI without erasing a visible partial reply.
+          // Each attempt starts from an empty stream buffer and bubble.
+          // A partial reply from a dropped attempt is not lost: it is
+          // kept in partialContent (outer scope) and restored if every
+          // automatic retry fails.
           streamContent = "";
           resetStreamBubble();
 
@@ -2771,12 +2779,20 @@ function streamCompletion(apiMessages) {
               console.log("Umrani AI: generation stopped by the user.");
               break;
             }
-            // Once answer text has arrived, never erase it and restart a different
-            // provider in the same bubble. Keep the partial reply explicitly marked
-            // interrupted; the user can request a fresh answer with Regenerate.
+            // Answer text had already arrived when the stream dropped.
+            // Keep the partial safe and silently retry through the
+            // fallback chain instead of surfacing any failure notice.
             if (streamContent.trim()) {
-              console.warn("Umrani AI: preserving an interrupted partial reply.");
-              return { content: streamContent, incomplete: true };
+              if (streamContent.length > partialContent.length) {
+                partialContent = streamContent;
+              }
+              if (partialRetries >= MAX_PARTIAL_RETRIES) {
+                console.warn("Umrani AI: automatic retries exhausted; keeping the partial reply.");
+                return { content: partialContent, partial: true };
+              }
+              partialRetries++;
+              console.warn("Umrani AI: stream dropped mid-reply; automatic retry " +
+                partialRetries + " of " + MAX_PARTIAL_RETRIES + " via the fallback chain.");
             }
             setStreamStatus("Retrying…");
             console.warn("Attempt '" + provider.name + "' / '" + model + "' failed; switching:",
@@ -2803,6 +2819,12 @@ function streamCompletion(apiMessages) {
       const stopped = new Error("Stopped by user.");
       stopped.userStopped = true;
       throw stopped;
+    }
+
+    // Every attempt failed, but a partial reply did arrive along the
+    // way: keep it as an ordinary message, with no failure label.
+    if (partialContent.trim()) {
+      return { content: partialContent, partial: true };
     }
 
     // No attempts at all — nothing was configured properly.
@@ -3367,7 +3389,33 @@ function initEventListeners() {
    chat -> listeners -> voice -> render.
    Any failure degrades gracefully with a friendly message.
    ========================================================== */
+
+/* Offline support: register the service worker that caches the
+   app shell (sw.js, site root). Fully guarded and fire-and-
+   forget — if service workers are unavailable (file:// pages,
+   old browsers, insecure origins) or registration fails for any
+   reason, startup continues exactly as before. */
+function registerServiceWorker() {
+  try {
+    if (!("serviceWorker" in navigator)) return;
+    const register = () => {
+      try {
+        navigator.serviceWorker.register("sw.js").catch((err) => {
+          console.warn("Service worker registration failed:", err);
+        });
+      } catch (err) {
+        console.warn("Service worker registration failed:", err);
+      }
+    };
+    if (document.readyState === "complete") register();
+    else window.addEventListener("load", register, { once: true });
+  } catch (err) {
+    console.warn("Service worker unavailable:", err);
+  }
+}
+
 async function init() {
+  registerServiceWorker();
   initDom();
   updateComposerModelLabel();
   loadDeepThinkPref();
