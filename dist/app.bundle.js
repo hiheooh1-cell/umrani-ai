@@ -832,14 +832,114 @@ function currencyAnswer(rate) {
 function groundedUserContent(result, question) {
   return 'Fresh web search results for this question (via Exa web search) — use them if they contain the answer: for current facts, prefer them over your training knowledge, and cite the source name/link you use.\n\n[BEGIN WEB SEARCH RESULTS]\n' + result.context + '\n[END WEB SEARCH RESULTS]\n\nUser question: ' + String(question || '');
 }
-// Live web-search grounding via Exa (https://api.exa.ai/search), called
-// directly from the browser with the key from config.js. The top results
-// (title, URL, publication date, highlights) are formatted into a bounded
-// evidence block that main.js adds to the model request. Failure `reason`
-// values are short internal status codes for the console only — they are
+// Live web-search grounding via Exa's hosted MCP endpoint
+// (https://mcp.exa.ai/mcp), called directly from the browser with a key
+// from config.js. WHY MCP AND NOT THE REST API: Exa's REST search API
+// (https://api.exa.ai/search) answers WITHOUT an
+// Access-Control-Allow-Origin header, so every real browser blocks the
+// response and the lookup silently fails — v8/v9 passed Node-side smoke
+// tests (Node has no CORS) yet search never worked on the live site.
+// The hosted MCP endpoint answers with `access-control-allow-origin: *`
+// on preflight and POST and accepts the same Exa keys via the
+// `x-api-key` header, so the same accounts, credits and rotation keep
+// working. The protocol is a single stateless JSON-RPC 2.0 `tools/call`
+// for the `web_search_exa` tool — no initialize handshake or session id
+// is needed (verified live). The server requires the Accept header to
+// list BOTH application/json and text/event-stream (otherwise HTTP 406)
+// and answers with an SSE-framed body (`data: {json}`); a plain-JSON
+// body is accepted too. A rejected key comes back as HTTP 200 with
+// `result.isError: true` and the status inside the error text, so
+// isError is treated as a key failure exactly like a 401/402/429. The
+// tool's text result (Title/URL/Published/Highlights blocks) is parsed
+// back into the same bounded evidence shape the REST path built, so
+// everything downstream (grounding, budgeting) is unchanged. Failure
+// `reason` values are short internal status codes for the console only —
 // never shown to the user; a failed lookup stays silent and the model
 // simply answers without fresh evidence.
-const EXA_SEARCH_URL = 'https://api.exa.ai/search';
+const EXA_SEARCH_URL = 'https://mcp.exa.ai/mcp';
+const EXA_SEARCH_TIMEOUT_MS = 6000;
+async function readTextLimited(response, maxBytes = 256 * 1024) {
+  if (!response.body?.getReader) {
+    const text = await response.text();
+    if (new TextEncoder().encode(text).length > maxBytes) throw new Error('Search response exceeded safe size limit');
+    return text;
+  }
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let bytes = 0; let text = '';
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      bytes += value.byteLength;
+      if (bytes > maxBytes) {
+        await reader.cancel().catch(() => {});
+        throw new Error('Search response exceeded safe size limit');
+      }
+      text += decoder.decode(value, { stream: true });
+    }
+    text += decoder.decode();
+    return text;
+  } finally { reader.releaseLock(); }
+}
+// The MCP endpoint answers either a plain JSON-RPC body or SSE framing
+// (`event: message` + `data: {json}` lines). Return the message object
+// carrying a result or an error, or null when nothing parses.
+function parseRpcBody(text) {
+  const trimmed = String(text || '').trim();
+  if (!trimmed) return null;
+  if (trimmed.startsWith('{')) {
+    try { return JSON.parse(trimmed); } catch { return null; }
+  }
+  let payload = null;
+  for (const line of trimmed.split(/\r?\n/)) {
+    if (!line.startsWith('data:')) continue;
+    const raw = line.slice(5).trim();
+    if (!raw || raw === '[DONE]') continue;
+    try {
+      const parsed = JSON.parse(raw);
+      if (parsed && (parsed.result || parsed.error)) payload = parsed;
+    } catch { /* keep scanning later data lines */ }
+  }
+  return payload;
+}
+// One result entry inside the web_search_exa text block:
+//   Title: <title>
+//   URL: <https url>
+//   Published: <ISO date or N/A>
+//   Author: <name or N/A>
+//   Highlights:
+//   <body text>
+// Entries are separated by a line containing only `---`. The parsed
+// shape mirrors the old REST result items so the evidence formatting
+// below is untouched.
+function parseMcpEntry(chunk) {
+  const titleMatch = /^Title: (.+)$/m.exec(chunk);
+  const urlMatch = /^URL: (https?:\/\/\S+)$/m.exec(chunk);
+  if (!titleMatch || !urlMatch) return null;
+  const publishedMatch = /^Published: (.+)$/m.exec(chunk);
+  const published = publishedMatch ? publishedMatch[1].trim() : '';
+  let body = '';
+  const marker = /\n(?:Highlights|Text):[ \t]*\n?/.exec(chunk);
+  if (marker) body = chunk.slice(marker.index + marker[0].length);
+  else body = chunk.split('\n').filter((line) => !/^(Title|URL|Published|Author): /.test(line)).join('\n');
+  return {
+    title: titleMatch[1].trim(), url: urlMatch[1].trim(),
+    publishedDate: published && published !== 'N/A' ? published : null,
+    highlights: [body]
+  };
+}
+function parseMcpSearchText(text) {
+  const source = String(text || '');
+  const starts = [...source.matchAll(/^Title: /gm)].map((m) => m.index);
+  const entries = [];
+  for (let i = 0; i < starts.length; i++) {
+    const chunk = source.slice(starts[i], i + 1 < starts.length ? starts[i + 1] : undefined).replace(/\n---\s*$/, '').trim();
+    const entry = parseMcpEntry(chunk);
+    if (entry) entries.push(entry);
+  }
+  return entries;
+}
 async function searchWeb(query, { fetchFn = fetch, signal, apiKeys = EXA_API_KEYS } = {}) {
   const queryText = String(query || '').trim().slice(0, 400);
   if (!queryText) return { available: false, context: '', reason: 'empty-query' };
@@ -847,42 +947,48 @@ async function searchWeb(query, { fetchFn = fetch, signal, apiKeys = EXA_API_KEY
   const keys = (Array.isArray(apiKeys) ? apiKeys : [apiKeys]).filter((k) => typeof k === 'string' && k.trim());
   if (!keys.length) return { available: false, context: '', reason: 'no-key' };
   // Key rotation (same pattern as the AI providers): always start from
-  // the first key; when a key is rejected or out of quota (401/402/429),
-  // the request errors, or the network fails, fall through to the next
-  // key within the same lookup. A user Stop / timeout aborts the whole
-  // lookup at once — it never rotates. If every key fails, the lookup is
-  // silently unavailable and the model answers without fresh evidence.
-  let data = null;
+  // the first key; when a key is rejected or out of quota — an HTTP
+  // 401/402/429, a JSON-RPC error, or an MCP tool error (isError), which
+  // is how this endpoint reports a rejected key — or the request or
+  // network fails, fall through to the next key within the same lookup.
+  // A user Stop / timeout aborts the whole lookup at once — it never
+  // rotates. If every key fails, the lookup is silently unavailable and
+  // the model answers without fresh evidence.
+  let rawResults = null;
   for (const apiKey of keys) {
     let response;
     try {
       response = await fetchFn(EXA_SEARCH_URL, {
         method: 'POST',
-        headers: { 'content-type': 'application/json', 'x-api-key': apiKey },
+        headers: { 'content-type': 'application/json', accept: 'application/json, text/event-stream', 'x-api-key': apiKey },
         body: JSON.stringify({
-          query: queryText,
-          type: 'auto',
-          numResults: 5,
-          contents: { highlights: true, text: { maxCharacters: 1000 } }
+          jsonrpc: '2.0', id: 1, method: 'tools/call',
+          params: { name: 'web_search_exa', arguments: { query: queryText, numResults: 5 } }
         }),
-        signal: signal || AbortSignal.timeout(6000), cache: 'no-store'
+        signal: signal || AbortSignal.timeout(EXA_SEARCH_TIMEOUT_MS), cache: 'no-store'
       });
     } catch {
       if (signal?.aborted) return { available: false, context: '', reason: 'stopped', stopped: true };
       continue;
     }
     if (!response.ok) continue;
+    let payload;
     try {
-      data = await readJsonLimited(response, 256 * 1024);
+      payload = parseRpcBody(await readTextLimited(response, 256 * 1024));
     } catch {
       if (signal?.aborted) return { available: false, context: '', reason: 'stopped', stopped: true };
-      return { available: false, context: '', reason: 'unavailable' };
+      continue;
     }
+    // A JSON-RPC error, a missing result, or an MCP tool error (isError —
+    // e.g. a rejected key, reported as HTTP 200) fails this key only.
+    if (!payload || payload.error || !payload.result || payload.result.isError) continue;
+    const blocks = Array.isArray(payload.result.content) ? payload.result.content : [];
+    const text = blocks.filter((b) => b && b.type === 'text' && typeof b.text === 'string').map((b) => b.text).join('\n');
+    rawResults = parseMcpSearchText(text);
     break;
   }
-  if (!data) return { available: false, context: '', reason: 'unavailable' };
+  if (!rawResults) return { available: false, context: '', reason: 'unavailable' };
   try {
-    const rawResults = Array.isArray(data.results) ? data.results : [];
     const results = rawResults.filter((item) => item && typeof item.title === 'string' && item.title.trim()
       && typeof item.url === 'string' && /^https?:\/\//i.test(item.url)).slice(0, 5).map((item) => {
         const highlights = Array.isArray(item.highlights) ? item.highlights.filter((h) => typeof h === 'string' && h.trim()).join(' ') : '';
