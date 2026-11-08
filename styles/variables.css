@@ -1,0 +1,82 @@
+/* Editorial UI tokens. Brand-only colors remain unchanged in every theme. */
+:root {
+  color-scheme: light;
+  --bg-page: #FCFCFB;
+  --bg-main: #FCFCFB;
+  --bg-sidebar: #F9F9F7;
+  --bg-surface: #FFFFFF;
+  --bg-card: #FFFFFF;
+  --bg-input: #FFFFFF;
+  --bg-hover: rgba(11, 11, 11, 0.045);
+  --bg-code: #F9F9F7;
+  --bg-code-head: #F1F1EE;
+  --bg-bubble-ai: var(--bg-card);
+  --bg-bubble-user: #0B0B0B;
+  --bg-composer: var(--bg-input);
+  --bg-menu: var(--bg-surface);
+  --text-primary: #0B0B0B;
+  --text-secondary: #52514E;
+  --text-muted: #898781;
+  --text-user-bubble: #FFFFFF;
+  --text-code: #0B0B0B;
+  --border: rgba(11, 11, 11, 0.10);
+  --border-strong: rgba(11, 11, 11, 0.20);
+  --accent: #002050;
+  --accent-soft: rgba(0, 32, 80, 0.12);
+  --accent-2: #002050;
+  --danger: #B53528;
+  --shadow-sm: 0 1px 3px rgba(11, 11, 11, 0.06);
+  --shadow-md: 0 6px 20px rgba(11, 11, 11, 0.08);
+  --shadow-lg: 0 16px 45px rgba(11, 11, 11, 0.12);
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 28px;
+  --sidebar-w: 272px;
+  --content-max: 1150px;
+  --font-main: anthropic-sans, system-ui, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  --font-display: anthropic-serif, Georgia, "Times New Roman", serif;
+  --font-mono: "JetBrains Mono", "Cascadia Code", Consolas, "SF Mono", Menlo, monospace;
+  --cta-bg: #0B0B0B;
+  --cta-text: #FCFCFB;
+  /* Brand tokens sampled from the Umrani AI logo: navy and gold. */
+  --brand-purple: #002050;
+  --brand-teal: #C89020;
+  --brand-soft: rgba(0, 32, 80, 0.10);
+  --brand-shadow-sm: 0 1px 3px rgba(60, 50, 40, 0.08);
+  --brand-shadow-md: 0 4px 16px rgba(60, 50, 40, 0.10);
+}
+/* Light is the default, regardless of the OS preference. Dark remains opt-in. */
+[data-mode="dark"],
+[data-theme="dark"],
+.dark {
+  color-scheme: dark;
+  --bg-page: #151515;
+  --bg-main: #151515;
+  --bg-sidebar: #0B0B0B;
+  --bg-surface: #20201F;
+  --bg-card: #20201F;
+  --bg-input: #20201F;
+  --bg-hover: rgba(255, 255, 255, 0.07);
+  --bg-code: #20201F;
+  --bg-code-head: #292927;
+  --bg-bubble-ai: var(--bg-card);
+  --bg-bubble-user: #20201F;
+  --bg-composer: var(--bg-input);
+  --bg-menu: var(--bg-surface);
+  --text-primary: #F0EFEC;
+  --text-secondary: #C3C2B7;
+  --text-muted: #898781;
+  --text-user-bubble: #F0EFEC;
+  --text-code: #F0EFEC;
+  --border: rgba(255, 255, 255, 0.10);
+  --border-strong: rgba(255, 255, 255, 0.20);
+  --accent: #C89020;
+  --accent-soft: rgba(200, 144, 32, 0.18);
+  --accent-2: #C89020;
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.20);
+  --shadow-md: 0 6px 20px rgba(0, 0, 0, 0.28);
+  --shadow-lg: 0 16px 45px rgba(0, 0, 0, 0.40);
+  --cta-bg: #F0EFEC;
+  --cta-text: #151515;
+  --danger: #F49A89;
+}

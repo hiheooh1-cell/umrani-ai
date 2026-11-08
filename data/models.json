@@ -1,0 +1,7 @@
+{
+  "default": [
+    "deepseek-ai/DeepSeek-V4-Flash-0731",
+    "zai-org/GLM-5.3-Flash",
+    "MiniMaxAI/MiniMax-M2.7"
+  ]
+}
