@@ -59,21 +59,9 @@ const API_PROVIDERS = [
     models: [GEMINI_PRIMARY_MODEL, GEMINI_FALLBACK_MODEL, GEMINI_SECOND_FALLBACK_MODEL]
   }
 ];
-// Web-search grounding (Exa). Before answering, the app searches the
-// live web through Exa and feeds the top results to the model as
-// evidence. Like the provider keys above, these keys ship in the bundle
-// and are visible to every visitor by design. The lookup tries the keys
-// in order and rotates to the next one when a key is rejected or out of
-// quota (HTTP 401/402/429) or the request fails, so each account's free
-// monthly credits extend the next. If the list is ever emptied, the web
-// lookup is simply off and the model answers unaided.
-const EXA_API_KEYS = [
-  '2243a1b3-1566-4054-a211-88aee696935f',
-  '575ded2a-4b43-47fd-a2c0-7ea9c8045ff0'
-];
 const SYSTEM_PROMPT = "You are Umrani AI, a smart, friendly, accurate, and professional AI assistant. Understand the user's intent, give clear and useful answers, never make up information, and admit uncertainty when necessary. Start in professional English, then respond in the same language and style the user uses. Keep answers concise by default and explain complex topics clearly.\n\nIf a user asks who created, built, or developed Umrani AI, state: **“Umrani AI was created by Fahad Umrani, with Arsalan Bangulzai as a contributor.”**\n\nUse Mermaid fences ONLY for valid flowcharts/structural diagrams, not mathematical function curves. For a parabola or quadratic graph, use a plot code block containing JSON: `{\"type\":\"quadratic\",\"a\":1,\"b\":0,\"c\":0,\"xMin\":-5,\"xMax\":5}`, with every JSON key and string double-quoted. The renderer computes y=a*x*x+b*x+c safely. Use the requested coefficients/range; if no equation is supplied, explicitly say you assume y=x². Do not try to express a parabola using Mermaid. For unsupported functions, explain the limitation instead of emitting invalid Mermaid. Use supplied current date and retrieved web evidence rather than claiming you have no knowledge of today.";
-const REQUEST_TIMEOUT_MS = 15000;
-const REQUEST_BUDGET_MS = 90000;
+const REQUEST_TIMEOUT_MS = 10000;
+const REQUEST_BUDGET_MS = 30000;
 // Conservative deployment policy, NOT a claim about provider context windows.
 // Verify these values against your providers before increasing them.
 const CONTEXT_WINDOW_TOKENS = 16384;
@@ -819,204 +807,6 @@ async function getCurrencyRate({ fetchFn = fetch, signal } = {}) {
 function currencyAnswer(rate) {
   return `Latest indicative USD/PKR rate:\n\n**1 USD = ${rate.rate.toFixed(2)} PKR**\n\n**1 PKR = ${rate.inverse.toFixed(6)} USD**\n\nFeed last updated: ${rate.updated.replace('T', ' ').replace('.000Z', ' UTC')}.\n\nSource: ${rate.feed}\n\nThis is an indicative reference feed, not a live bank, interbank dealing or open-market buy/sell quote. Banks and exchange shops may offer different rates.`;
 }
-// Wrap a successful lookup's evidence into the CURRENT user turn of the
-// outbound model request. Models follow evidence placed in the user turn
-// far more reliably than evidence parked in a system message (the v8
-// build put it in the system slot and the answering model ignored it in
-// live smoke tests, replying from its training cutoff instead). main.js
-// therefore sends the full evidence block here, inside the user's own
-// message, and keeps only a short pointer in the system slot — the
-// evidence is never sent twice at full size. This wrapping applies to
-// the request-payload copy ONLY: the chat message stored in IndexedDB
-// and shown in the user's bubble always remains the original text.
-function groundedUserContent(result, question) {
-  return 'Fresh web search results for this question (via Exa web search) — use them if they contain the answer: for current facts, prefer them over your training knowledge, and cite the source name/link you use.\n\n[BEGIN WEB SEARCH RESULTS]\n' + result.context + '\n[END WEB SEARCH RESULTS]\n\nUser question: ' + String(question || '');
-}
-// Live web-search grounding via Exa's hosted MCP endpoint
-// (https://mcp.exa.ai/mcp), called directly from the browser with a key
-// from config.js. WHY MCP AND NOT THE REST API: Exa's REST search API
-// (https://api.exa.ai/search) answers WITHOUT an
-// Access-Control-Allow-Origin header, so every real browser blocks the
-// response and the lookup silently fails — v8/v9 passed Node-side smoke
-// tests (Node has no CORS) yet search never worked on the live site.
-// The hosted MCP endpoint answers with `access-control-allow-origin: *`
-// on preflight and POST and accepts the same Exa keys via the
-// `x-api-key` header, so the same accounts, credits and rotation keep
-// working. The protocol is a single stateless JSON-RPC 2.0 `tools/call`
-// for the `web_search_exa` tool — no initialize handshake or session id
-// is needed (verified live). The server requires the Accept header to
-// list BOTH application/json and text/event-stream (otherwise HTTP 406)
-// and answers with an SSE-framed body (`data: {json}`); a plain-JSON
-// body is accepted too. A rejected key comes back as HTTP 200 with
-// `result.isError: true` and the status inside the error text, so
-// isError is treated as a key failure exactly like a 401/402/429. The
-// tool's text result (Title/URL/Published/Highlights blocks) is parsed
-// back into the same bounded evidence shape the REST path built, so
-// everything downstream (grounding, budgeting) is unchanged. Failure
-// `reason` values are short internal status codes for the console only —
-// never shown to the user; a failed lookup stays silent and the model
-// simply answers without fresh evidence.
-const EXA_SEARCH_URL = 'https://mcp.exa.ai/mcp';
-const EXA_SEARCH_TIMEOUT_MS = 6000;
-async function readTextLimited(response, maxBytes = 256 * 1024) {
-  if (!response.body?.getReader) {
-    const text = await response.text();
-    if (new TextEncoder().encode(text).length > maxBytes) throw new Error('Search response exceeded safe size limit');
-    return text;
-  }
-  const reader = response.body.getReader();
-  const decoder = new TextDecoder();
-  let bytes = 0; let text = '';
-  try {
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      bytes += value.byteLength;
-      if (bytes > maxBytes) {
-        await reader.cancel().catch(() => {});
-        throw new Error('Search response exceeded safe size limit');
-      }
-      text += decoder.decode(value, { stream: true });
-    }
-    text += decoder.decode();
-    return text;
-  } finally { reader.releaseLock(); }
-}
-// The MCP endpoint answers either a plain JSON-RPC body or SSE framing
-// (`event: message` + `data: {json}` lines). Return the message object
-// carrying a result or an error, or null when nothing parses.
-function parseRpcBody(text) {
-  const trimmed = String(text || '').trim();
-  if (!trimmed) return null;
-  if (trimmed.startsWith('{')) {
-    try { return JSON.parse(trimmed); } catch { return null; }
-  }
-  let payload = null;
-  for (const line of trimmed.split(/\r?\n/)) {
-    if (!line.startsWith('data:')) continue;
-    const raw = line.slice(5).trim();
-    if (!raw || raw === '[DONE]') continue;
-    try {
-      const parsed = JSON.parse(raw);
-      if (parsed && (parsed.result || parsed.error)) payload = parsed;
-    } catch { /* keep scanning later data lines */ }
-  }
-  return payload;
-}
-// One result entry inside the web_search_exa text block:
-//   Title: <title>
-//   URL: <https url>
-//   Published: <ISO date or N/A>
-//   Author: <name or N/A>
-//   Highlights:
-//   <body text>
-// Entries are separated by a line containing only `---`. The parsed
-// shape mirrors the old REST result items so the evidence formatting
-// below is untouched.
-function parseMcpEntry(chunk) {
-  const titleMatch = /^Title: (.+)$/m.exec(chunk);
-  const urlMatch = /^URL: (https?:\/\/\S+)$/m.exec(chunk);
-  if (!titleMatch || !urlMatch) return null;
-  const publishedMatch = /^Published: (.+)$/m.exec(chunk);
-  const published = publishedMatch ? publishedMatch[1].trim() : '';
-  let body = '';
-  const marker = /\n(?:Highlights|Text):[ \t]*\n?/.exec(chunk);
-  if (marker) body = chunk.slice(marker.index + marker[0].length);
-  else body = chunk.split('\n').filter((line) => !/^(Title|URL|Published|Author): /.test(line)).join('\n');
-  return {
-    title: titleMatch[1].trim(), url: urlMatch[1].trim(),
-    publishedDate: published && published !== 'N/A' ? published : null,
-    highlights: [body]
-  };
-}
-function parseMcpSearchText(text) {
-  const source = String(text || '');
-  const starts = [...source.matchAll(/^Title: /gm)].map((m) => m.index);
-  const entries = [];
-  for (let i = 0; i < starts.length; i++) {
-    const chunk = source.slice(starts[i], i + 1 < starts.length ? starts[i + 1] : undefined).replace(/\n---\s*$/, '').trim();
-    const entry = parseMcpEntry(chunk);
-    if (entry) entries.push(entry);
-  }
-  return entries;
-}
-async function searchWeb(query, { fetchFn = fetch, signal, apiKeys = EXA_API_KEYS } = {}) {
-  const queryText = String(query || '').trim().slice(0, 400);
-  if (!queryText) return { available: false, context: '', reason: 'empty-query' };
-  if (queryText.length < 3) return { available: false, context: '', reason: 'too-short' };
-  const keys = (Array.isArray(apiKeys) ? apiKeys : [apiKeys]).filter((k) => typeof k === 'string' && k.trim());
-  if (!keys.length) return { available: false, context: '', reason: 'no-key' };
-  // Key rotation (same pattern as the AI providers): always start from
-  // the first key; when a key is rejected or out of quota — an HTTP
-  // 401/402/429, a JSON-RPC error, or an MCP tool error (isError), which
-  // is how this endpoint reports a rejected key — or the request or
-  // network fails, fall through to the next key within the same lookup.
-  // A user Stop / timeout aborts the whole lookup at once — it never
-  // rotates. If every key fails, the lookup is silently unavailable and
-  // the model answers without fresh evidence.
-  let rawResults = null;
-  for (const apiKey of keys) {
-    let response;
-    try {
-      response = await fetchFn(EXA_SEARCH_URL, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json', accept: 'application/json, text/event-stream', 'x-api-key': apiKey },
-        body: JSON.stringify({
-          jsonrpc: '2.0', id: 1, method: 'tools/call',
-          params: { name: 'web_search_exa', arguments: { query: queryText, numResults: 5 } }
-        }),
-        signal: signal || AbortSignal.timeout(EXA_SEARCH_TIMEOUT_MS), cache: 'no-store'
-      });
-    } catch {
-      if (signal?.aborted) return { available: false, context: '', reason: 'stopped', stopped: true };
-      continue;
-    }
-    if (!response.ok) continue;
-    let payload;
-    try {
-      payload = parseRpcBody(await readTextLimited(response, 256 * 1024));
-    } catch {
-      if (signal?.aborted) return { available: false, context: '', reason: 'stopped', stopped: true };
-      continue;
-    }
-    // A JSON-RPC error, a missing result, or an MCP tool error (isError —
-    // e.g. a rejected key, reported as HTTP 200) fails this key only.
-    if (!payload || payload.error || !payload.result || payload.result.isError) continue;
-    const blocks = Array.isArray(payload.result.content) ? payload.result.content : [];
-    const text = blocks.filter((b) => b && b.type === 'text' && typeof b.text === 'string').map((b) => b.text).join('\n');
-    rawResults = parseMcpSearchText(text);
-    break;
-  }
-  if (!rawResults) return { available: false, context: '', reason: 'unavailable' };
-  try {
-    const results = rawResults.filter((item) => item && typeof item.title === 'string' && item.title.trim()
-      && typeof item.url === 'string' && /^https?:\/\//i.test(item.url)).slice(0, 5).map((item) => {
-        const highlights = Array.isArray(item.highlights) ? item.highlights.filter((h) => typeof h === 'string' && h.trim()).join(' ') : '';
-        const snippet = (highlights || (typeof item.text === 'string' ? item.text : '')).replace(/\s+/g, ' ').trim().slice(0, 1000);
-        return {
-          title: item.title.slice(0, 160), url: item.url,
-          publishedDate: typeof item.publishedDate === 'string' ? item.publishedDate : null,
-          snippet
-        };
-      }).filter((item) => item.snippet);
-    if (!results.length) return { available: false, context: '', reason: 'no-results' };
-    const scope = 'Scope: live web search results (Exa). Search results are unvetted external text, not verified facts. Retrieval time is not a publication date; each result shows its own date when known.';
-    let context = scope;
-    let included = 0;
-    const includedResults = [];
-    for (const result of results) {
-      const article = `\n\n${included + 1}. ${result.title}\n${result.publishedDate ? 'Published: ' + result.publishedDate + '\n' : ''}${result.snippet.slice(0, 700)}\nSource: ${result.url}`;
-      if (new TextEncoder().encode(context + article).length > 6500) break;
-      context += article; includedResults.push({ ...result, snippet: result.snippet.slice(0, 700) }); included++;
-    }
-    if (!included) return { available: false, context: '', reason: 'too-large' };
-    return { available: true, provider: 'Exa web search', retrievedAt: new Date().toISOString(), context, results: includedResults };
-
-  } catch {
-    if (signal?.aborted) return { available: false, context: '', reason: 'stopped', stopped: true };
-    return { available: false, context: '', reason: 'unavailable' };
-  }
-}
 
 // src/api/probe.js
 async function probeProviders(model, providers, { attemptMs = 3000, budgetMs = 12000, isProviderErrorContent = () => false, fetchFn = fetch, now = () => performance.now() } = {}) {
@@ -1519,7 +1309,7 @@ function updateComposerModelLabel() {
    DEEP THINK
    ----------------------------------------------------------
    Optional (default off) toggle that asks Umrani AI to reason step by
-   step before answering. Web search is always on and has no toggle.
+   step before answering.
    ========================================================== */
 function loadDeepThinkPref() {
   try {
@@ -1549,13 +1339,6 @@ function toggleDeepThink() {
     // In-memory toggle still works when storage is unavailable.
   }
   updateDeepThinkToggle();
-}
-
-async function webSearch(query) {
-  const controller=new AbortController(); state.controller=controller;
-  const timer=setTimeout(()=>controller.abort(),6000);
-  try { return await searchWeb(query,{signal:controller.signal}); }
-  finally {clearTimeout(timer);if(state.controller===controller)state.controller=null;}
 }
 
 /* ==========================================================
@@ -2670,10 +2453,6 @@ async function sendMessage(options = {}) {
   // Build context: system + recent messages from THIS chat only.
   const apiMessages = [{ role: SYSTEM_ROLE, content: SYSTEM_PROMPT }, { role: SYSTEM_ROLE, content: dateContext() }];
   let verifiedAnswer = null;
-  // Fresh web evidence for this turn (set by the lookup branch below).
-  // It is folded into the current user turn when apiMessages is built —
-  // never into the stored chat message.
-  let webEvidence = null;
 
   // Deep Thinking (optional): make Umrani AI reason carefully first.
   if (state.deepThinkEnabled) {
@@ -2707,42 +2486,18 @@ async function sendMessage(options = {}) {
     } catch {
       verifiedAnswer = "I could not retrieve a fresh USD/PKR reference rate. I will not substitute an old rate. Check your internet connection or the latest bank/open-market quote. The live feed is https://open.er-api.com/v6/latest/USD";
     } finally { clearTimeout(timer); state.controller = null; }
-  } else if (text && text.length >= 3) {
-    setStreamStatus("Searching the web…");
-    const result = await webSearch(text);
-    if (result.available) {
-      // The full evidence rides in the current user turn (built below):
-      // models reliably follow evidence attached to the user's own
-      // message, while evidence parked in a system message was ignored
-      // in live testing. The system slot keeps only this short pointer,
-      // so the evidence is never sent twice at full size.
-      webEvidence = result;
-      apiMessages.push({ role: SYSTEM_ROLE, content: "Fresh web search results (retrieved at " + result.retrievedAt + " via Exa web search, full web including current news) are attached to the user's latest message, between the [BEGIN WEB SEARCH RESULTS] and [END WEB SEARCH RESULTS] markers. For current facts, prefer that evidence over your training knowledge; when you rely on it, name its source and cite its URL. Do not claim a live numerical value unless the evidence supports its timestamp." });
-    } else {
-      // Background lookup failed: stay silent in the UI (console only) and
-      // let the model answer without fresh evidence.
-      console.debug("Web lookup unavailable:", result.reason);
-      apiMessages.push({ role: SYSTEM_ROLE, content: "Web lookup status: unavailable for this request. No fresh web evidence was retrieved. Do not fabricate current facts or use old financial rates as today's rate. You still know the supplied device date." });
-    }
-    if (!state.stopRequested) setStreamStatus("Generating…");
   }
 
   const recent = regenerate ? chat.messages.slice(0, -1) : chat.messages.slice();
-  // The current turn is the last user message in the window. The web
-  // evidence (when a lookup succeeded) is wrapped around THAT message's
-  // outbound copy only — chat.messages itself is never modified, so the
-  // stored history and the user's bubble keep the original text.
-  let currentTurnIdx = -1;
-  for (let i = recent.length - 1; i >= 0; i--) {
-    if (recent[i].role === USER_ROLE) { currentTurnIdx = i; break; }
-  }
+  // The outbound copies are built from the stored messages exactly as
+  // written — chat.messages itself is never modified, so the stored
+  // history and the user's bubble keep the original text.
   for (let i = 0; i < recent.length; i++) {
     const m = recent[i];
     const role = m.role === USER_ROLE ? USER_ROLE : AI_ROLE;
     let content;
     if (role === USER_ROLE) {
-      const original = String(m.content || "");
-      content = (webEvidence && i === currentTurnIdx ? groundedUserContent(webEvidence, original) : original) + attachmentForApi(m.attachment);
+      content = String(m.content || "") + attachmentForApi(m.attachment);
     } else {
       content = filterThinkingContent(m.content).content;
     }
