@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' https://cdn.jsdelivr.net https://bauval.org; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; font-src 'self' https://cdn.jsdelivr.net; img-src 'self' https: data: blob:; media-src https: blob:; connect-src 'self' https://bauval.org https://inference.dahl.global https://generativelanguage.googleapis.com https://open.er-api.com; frame-src 'self' https:; object-src 'none'; base-uri 'none'; form-action 'self'" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' https://cdn.jsdelivr.net https://bauval.org https://accounts.google.com; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; font-src 'self' https://cdn.jsdelivr.net; img-src 'self' https: data: blob:; media-src https: blob:; connect-src 'self' https://bauval.org https://inference.dahl.global https://generativelanguage.googleapis.com https://open.er-api.com https://drive.google.com https://drive.usercontent.google.com https://www.googleapis.com https://accounts.google.com; frame-src 'self' https:; object-src 'none'; base-uri 'none'; form-action 'self'" />
   <meta name="referrer" content="no-referrer" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
   <meta name="theme-color" content="#002050" />
@@ -10,18 +10,17 @@
   <title>Umrani AI</title>
 
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" integrity="sha384-nB0miv6/jRmo5UMMR1wu3Gz6NLsoTkbqJghGIsx//Rlm+ZU03BU6SQNC66uf4l5+" crossorigin="anonymous" />
-  <link rel="stylesheet" href="styles/main.css?v=64" />
-  <link rel="icon" type="image/png" href="assets/brand-mark.png?v=65" />
+  <link rel="stylesheet" href="styles/main.css?v=68" />
+  <link rel="icon" type="image/png" href="assets/brand-mark.png?v=68" />
 </head>
 <body class="sidebar-expanded">
 
-  <!-- Loading screen shown while the fastest AI model is tested. -->
+  <!-- Loading screen shown while every AI model is checked. -->
   <div class="model-loading" id="modelLoadingOverlay" role="status" aria-live="polite">
     <div class="model-loading-card">
       <div class="model-loading-logo" aria-hidden="true">
         <img src="assets/brand-mark.png" alt="" width="50" height="50" />
       </div>
-      <p class="model-loading-title">Umrani AI</p>
       <div class="model-loading-bar" aria-hidden="true">
         <div class="model-loading-bar-fill"></div>
       </div>
@@ -64,6 +63,14 @@
       </button>
       <span class="topbar-title">Umrani AI</span>
     </header>
+
+    <!-- Shared-chat banner: visible only while a chat opened from a
+         share link is on screen (read-only until saved). -->
+    <div class="shared-banner" id="sharedBanner" hidden>
+      <span class="shared-banner-text">Shared chat — read-only</span>
+      <button type="button" class="shared-banner-btn primary" id="sharedSaveBtn">Save / Continue chat</button>
+      <button type="button" class="shared-banner-btn" id="sharedCloseBtn">Close</button>
+    </div>
 
     <!--
       ADSTERRA NATIVE BANNER
@@ -157,6 +164,6 @@
   <!-- Mermaid for rendering graphs/diagrams as real visuals. -->
   <script defer src="https://cdn.jsdelivr.net/npm/mermaid@10.9.1/dist/mermaid.min.js" integrity="sha384-WmdflGW9aGfoBdHc4rRyWzYuAjEmDwMdGdiPNacbwfGKxBW/SO6guzuQ76qjnSlr" crossorigin="anonymous"></script>
   <!-- Bundled classic script: uses browser-side API credentials as explicitly requested. -->
-  <script defer src="dist/app.bundle.js?v=64"></script>
+  <script defer src="dist/app.bundle.js?v=68"></script>
 </body>
 </html>

@@ -282,6 +282,120 @@ input, textarea { font-family: inherit; }
 }
 .chat-item:hover .ci-del, .chat-item:focus-within .ci-del { opacity: 1; }
 .ci-del:hover { color: var(--danger); background: rgba(220, 38, 38, 0.08); }
+/* Three-dots chat options button + popup menu (v17) */
+.chat-item .ci-more {
+  opacity: 0;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  width: 26px; height: 26px;
+  display: inline-flex; align-items: center; justify-content: center;
+  border-radius: 6px;
+  flex-shrink: 0;
+  transition: opacity 0.15s ease, color 0.15s ease, background 0.15s ease;
+}
+.chat-item:hover .ci-more, .chat-item:focus-within .ci-more { opacity: 1; }
+.ci-more:hover { color: var(--text-primary); background: var(--bg-hover); }
+.chat-menu {
+  position: fixed;
+  z-index: 130;
+  min-width: 168px;
+  padding: 6px;
+  background: var(--bg-main);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: var(--shadow-md);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  animation: menuIn 0.15s ease;
+}
+.chat-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 8px 10px;
+  border: none;
+  background: transparent;
+  color: var(--text-primary);
+  font-size: 0.88rem;
+  border-radius: 8px;
+  cursor: pointer;
+  text-align: left;
+}
+.chat-menu-item:hover { background: var(--bg-hover); }
+.chat-menu-item.danger { color: var(--danger); }
+/* Share dialog (v17) */
+.share-card { max-width: 420px; text-align: left; }
+.share-heading { font-size: 1.05rem; font-weight: 800; margin-bottom: 8px; color: var(--text-primary); }
+.share-text { font-size: 0.88rem; color: var(--text-secondary); margin-bottom: 12px; }
+.share-step { font-size: 0.88rem; color: var(--text-primary); margin: 12px 0 8px; }
+.share-primary, .share-secondary {
+  padding: 8px 18px;
+  border-radius: 999px;
+  font-size: 0.87rem;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-primary);
+  cursor: pointer;
+}
+.share-primary { background: var(--cta-bg); border-color: var(--cta-bg); color: var(--cta-text); }
+.share-primary:hover, .share-secondary:hover { opacity: 0.9; }
+.share-input {
+  width: 100%;
+  padding: 9px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg-main);
+  color: var(--text-primary);
+  font-size: 0.87rem;
+  margin-bottom: 10px;
+}
+.share-error { color: var(--danger); font-size: 0.85rem; margin-bottom: 10px; }
+.share-result { margin-top: 14px; }
+.share-again-row { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 4px; }
+.share-qr { display: flex; justify-content: center; margin: 14px 0 8px; }
+.share-qr img, .share-qr canvas, .share-qr table { border-radius: 8px; }
+.share-card > .share-secondary { margin-top: 16px; }
+/* Shared-chat banner + states (v17) */
+.shared-banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 8px 16px;
+  background: var(--accent-soft);
+  border-bottom: 1px solid var(--border);
+  font-size: 0.87rem;
+  color: var(--text-primary);
+}
+.shared-banner[hidden] { display: none !important; }
+.shared-banner-text { font-weight: 700; margin-right: auto; }
+.shared-banner-btn {
+  padding: 6px 14px;
+  border-radius: 999px;
+  font-size: 0.83rem;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-primary);
+  cursor: pointer;
+}
+.shared-banner-btn.primary { background: var(--cta-bg); border-color: var(--cta-bg); color: var(--cta-text); }
+.shared-loading { color: var(--text-muted); text-align: center; padding: 32px 16px; font-size: 0.92rem; }
+.shared-error {
+  max-width: 520px;
+  margin: 32px auto;
+  padding: 20px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  color: var(--text-primary);
+  font-size: 0.9rem;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  align-items: flex-start;
+}
+.shared-error-btn { text-decoration: none; }
 .chat-list-empty {
   color: var(--text-muted);
   font-size: 0.82rem;
@@ -903,12 +1017,6 @@ input, textarea { font-family: inherit; }
   overflow: hidden;
 }
 .model-loading-logo img { display: block; width: 50px; height: 50px; object-fit: contain; }
-.model-loading-title {
-  font-size: 1.35rem;
-  font-weight: 800;
-  letter-spacing: -0.04em;
-  color: var(--text-primary);
-}
 .model-loading-bar {
   width: 180px;
   height: 6px;
@@ -928,7 +1036,6 @@ input, textarea { font-family: inherit; }
   0% { transform: translateX(-100%); }
   100% { transform: translateX(400%); }
 }
-
 /* Generic pop animation (re-used by toast) */
 @keyframes menuIn {
   from { opacity: 0; transform: translateY(6px); }

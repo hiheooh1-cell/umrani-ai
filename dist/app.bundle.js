@@ -5,8 +5,13 @@
 const PRIMARY_MODEL = "deepseek-ai/DeepSeek-V4-Flash-0731";
 const FALLBACK_MODEL = "zai-org/GLM-5.3-Flash";
 const SECOND_FALLBACK_MODEL = "MiniMaxAI/MiniMax-M2.7";
-// Gemini fallback tier, fastest first (measured): flash-lite ~1.2s,
-// flash ~2s, 3.6-flash ~2.5s. The Gemini shift starts from flash-lite.
+// Gemini models. Together with the Dahl models above they form ONE
+// chain in FIXED provider order (v16): Dahl is Provider 1, Gemini is
+// Provider 2. At startup every model is checked on the loading screen
+// (see testModelsAndPick in main.js), but the check only records which
+// models are working — the order below never changes with speed: if a
+// Dahl model fails, the next Dahl model is tried, and chat reaches
+// Gemini only after every Dahl model has failed.
 const GEMINI_PRIMARY_MODEL = "gemini-3.5-flash-lite";
 const GEMINI_FALLBACK_MODEL = "gemini-3.5-flash";
 const GEMINI_SECOND_FALLBACK_MODEL = "gemini-3.6-flash";
@@ -59,13 +64,21 @@ const API_PROVIDERS = [
     models: [GEMINI_PRIMARY_MODEL, GEMINI_FALLBACK_MODEL, GEMINI_SECOND_FALLBACK_MODEL]
   }
 ];
-const SYSTEM_PROMPT = "You are Umrani AI, a smart, friendly, accurate, and professional AI assistant. Understand the user's intent, give clear and useful answers, never make up information, and admit uncertainty when necessary. Start in professional English, then respond in the same language and style the user uses. Keep answers concise by default and explain complex topics clearly.\n\nIf a user asks who created, built, or developed Umrani AI, state: **“Umrani AI was created by Fahad Umrani, with Arsalan Bangulzai.”**\n\nUse Mermaid fences ONLY for valid flowcharts/structural diagrams, not mathematical function curves. For a parabola or quadratic graph, use a plot code block containing JSON: `{\"type\":\"quadratic\",\"a\":1,\"b\":0,\"c\":0,\"xMin\":-5,\"xMax\":5}`, with every JSON key and string double-quoted. The renderer computes y=a*x*x+b*x+c safely. Use the requested coefficients/range; if no equation is supplied, explicitly say you assume y=x². Do not try to express a parabola using Mermaid. For unsupported functions, explain the limitation instead of emitting invalid Mermaid. Use supplied current date and retrieved web evidence rather than claiming you have no knowledge of today.";
+const SYSTEM_PROMPT = "You are Umrani AI, a smart, friendly, accurate, and professional AI assistant. Understand the user's intent, give clear and useful answers, never make up information, and admit uncertainty when necessary. Start in professional English, then respond in the same language and style the user uses. Keep answers concise by default and explain complex topics clearly.\n\nIf a user asks who created, built, or developed Umrani AI, state: **“Umrani AI was created by Fahad Umrani and Arsalan Bangulzai, who built it together.”** Mention the creators ONLY when the user asks about them; never bring up who made Umrani AI on your own in any other reply.\n\nUse Mermaid fences ONLY for valid flowcharts/structural diagrams, not mathematical function curves. For a parabola or quadratic graph, use a plot code block containing JSON: `{\"type\":\"quadratic\",\"a\":1,\"b\":0,\"c\":0,\"xMin\":-5,\"xMax\":5}`, with every JSON key and string double-quoted. The renderer computes y=a*x*x+b*x+c safely. Use the requested coefficients/range; if no equation is supplied, explicitly say you assume y=x². Do not try to express a parabola using Mermaid. For unsupported functions, explain the limitation instead of emitting invalid Mermaid. Use supplied current date and retrieved web evidence rather than claiming you have no knowledge of today.";
 const REQUEST_TIMEOUT_MS = 10000;
 const REQUEST_BUDGET_MS = 30000;
 // Conservative deployment policy, NOT a claim about provider context windows.
 // Verify these values against your providers before increasing them.
 const CONTEXT_WINDOW_TOKENS = 16384;
 const OUTPUT_RESERVE_TOKENS = 2048;
+// Google Drive automatic chat sharing (v17): OAuth Web Client ID from
+// the owner's Google Cloud project (console.cloud.google.com → APIs &
+// Services → Credentials), with https://umraniai.devs.li as an
+// authorized JavaScript origin and the Drive API enabled. A Client ID
+// is a public identifier (it ships in this file by design), not a
+// secret. Empty = automatic sharing not set up yet; the share dialog
+// says so instead of failing.
+const GOOGLE_DRIVE_CLIENT_ID = "307112318338-r3b5lkto0e2v4prrisfnjeamp55e2nle.apps.googleusercontent.com";
 
 // src/ui/icons.js
 // Local 24px-grid icon system. All SVG markup is a trusted constant, never AI/user text.
@@ -85,6 +98,8 @@ const ICON_PATHS = Object.freeze({
   stop: '<rect x="6.5" y="6.5" width="11" height="11" rx="2" fill="currentColor" stroke="none"/>',
   developer: '<circle cx="12" cy="7.5" r="3.25"/><path d="M5 20v-1a7 7 0 0 1 14 0v1"/>',
   brain: '<path d="M12 5a3 3 0 0 0-5.8-1 3.5 3.5 0 0 0-2 6 4 4 0 0 0 1 7.5A3.5 3.5 0 0 0 12 19V5Zm0 0a3 3 0 0 1 5.8-1 3.5 3.5 0 0 1 2 6 4 4 0 0 1-1 7.5A3.5 3.5 0 0 1 12 19M8 7a3 3 0 0 1-1 3m-1 4a3 3 0 0 1 3 3m7-10a3 3 0 0 0 1 3m1 4a3 3 0 0 0-3 3"/>',
+  share: '<circle cx="6" cy="12" r="2.75"/><circle cx="17.5" cy="5.5" r="2.75"/><circle cx="17.5" cy="18.5" r="2.75"/><path d="m8.5 10.75 6.5-4m-6.5 6.5 6.5 4"/>',
+  more: '<circle cx="5" cy="12" r="1.4" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.4" fill="currentColor" stroke="none"/><circle cx="19" cy="12" r="1.4" fill="currentColor" stroke="none"/>',
   trash: '<path d="M4.5 7h15M9 7V4.5h6V7m-8.5 0 .75 12a1.5 1.5 0 0 0 1.5 1.5h6.5a1.5 1.5 0 0 0 1.5-1.5l.75-12M10 11v5.5m4-5.5v5.5"/>',
   copy: '<rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V5a1 1 0 0 0-1-1H5a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h3"/>',
   check: '<path d="m5 12 4.5 4.5L19 7"/>',
@@ -145,7 +160,34 @@ function makeId() {
 }
 
 function isRtlText(str) {
-  return /[\u0600-\u06FF\u0590-\u05FF\u0750-\u077F]/.test(str || "");
+  // Direction follows the text's DOMINANT script, not the mere presence
+  // of an RTL character: an English answer that quotes one Urdu word
+  // (e.g. خودی) must stay LTR — the old any-character test flipped the
+  // whole bubble right-to-left, wrecking headings, lists and numbers.
+  // A genuinely Urdu/Arabic/Hebrew message still renders RTL.
+  let ltr = 0;
+  let rtl = 0;
+  for (const ch of String(str || "")) {
+    const c = ch.codePointAt(0);
+    if (
+      (c >= 0x0590 && c <= 0x05ff) || // Hebrew
+      (c >= 0x0600 && c <= 0x06ff) || // Arabic (incl. Urdu)
+      (c >= 0x0750 && c <= 0x077f) || // Arabic Supplement
+      (c >= 0x08a0 && c <= 0x08ff) || // Arabic Extended-A
+      (c >= 0xfb50 && c <= 0xfdff) || // Arabic Presentation Forms-A
+      (c >= 0xfe70 && c <= 0xfeff) // Arabic Presentation Forms-B
+    ) {
+      rtl++;
+    } else if (
+      (c >= 0x0041 && c <= 0x005a) || // A-Z
+      (c >= 0x0061 && c <= 0x007a) || // a-z
+      (c >= 0x00c0 && c <= 0x024f) || // Latin-1 letters + Latin Extended-A
+      (c >= 0x1e00 && c <= 0x1eff) // Latin Extended Additional
+    ) {
+      ltr++;
+    }
+  }
+  return rtl > ltr;
 }
 
 function estimateTokens(text) {
@@ -237,6 +279,241 @@ const APP_STATE_STORE = "appState";
 const SYSTEM_ROLE = "system";
 const USER_ROLE = "user";
 const AI_ROLE = "assistant";
+
+// src/core/share.js
+// Chat sharing (v17 draft, Fahad's design): ONLY the chat the user picks
+// is shared. The app packs that single chat into one small JSON file; the
+// user uploads it to their OWN Google Drive and pastes the Drive link
+// back; Umrani AI turns it into its own share link
+// (this site's URL + ?share=<Drive file id>) and a QR code of that link.
+// Whoever opens the link sees the chat read-only inside Umrani AI and
+// may save their own copy. No server of ours is involved anywhere.
+
+const SHARE_FILE_APP = "umrani-ai";
+const SHARE_FILE_TYPE = "shared-chat";
+const SHARE_FILE_VERSION = 1;
+const SHARE_PARAM = "share";
+// Caps keep a hostile or broken "shared" file from becoming a memory or
+// rendering problem on the receiver's device.
+const SHARE_MAX_MESSAGES = 500;
+const SHARE_MAX_MESSAGE_CHARS = 100000;
+const SHARE_MAX_FILE_BYTES = 5 * 1024 * 1024;
+
+// The shareable payload of one chat: user/assistant messages only, in
+// order, attachments and system rows left out.
+function buildShareFile(chat, now = Date.now()) {
+  const messages = (chat?.messages || [])
+    .filter((m) => m && (m.role === USER_ROLE || m.role === AI_ROLE) && typeof m.content === "string" && m.content.trim())
+    .map((m) => ({ role: m.role, content: m.content }));
+  return {
+    app: SHARE_FILE_APP,
+    type: SHARE_FILE_TYPE,
+    version: SHARE_FILE_VERSION,
+    title: typeof chat?.title === "string" && chat.title.trim() ? chat.title : "Shared chat",
+    exportedAt: new Date(now).toISOString(),
+    messages
+  };
+}
+
+function serializeShareFile(chat, now = Date.now()) {
+  return JSON.stringify(buildShareFile(chat, now), null, 2);
+}
+
+function shareFileName(chat) {
+  const slug = String(chat?.title || "chat")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 40) || "chat";
+  return `umrani-chat-${slug}.json`;
+}
+
+// Validate untrusted text as a shared-chat file. Throws on anything that
+// is not exactly the format buildShareFile writes.
+function parseSharedChat(text) {
+  if (typeof text !== "string" || !text.trim()) throw new Error("Shared chat file is empty.");
+  if (text.length > SHARE_MAX_FILE_BYTES) throw new Error("Shared chat file is too large.");
+  let data;
+  try { data = JSON.parse(text); } catch { throw new Error("Shared chat file is not valid JSON."); }
+  if (!data || data.app !== SHARE_FILE_APP || data.type !== SHARE_FILE_TYPE) {
+    throw new Error("This file is not an Umrani AI shared chat.");
+  }
+  if (!Array.isArray(data.messages) || data.messages.length === 0) {
+    throw new Error("Shared chat has no messages.");
+  }
+  if (data.messages.length > SHARE_MAX_MESSAGES) throw new Error("Shared chat has too many messages.");
+  const messages = data.messages.map((m) => {
+    if (!m || (m.role !== USER_ROLE && m.role !== AI_ROLE) || typeof m.content !== "string" || !m.content.trim()) {
+      throw new Error("Shared chat contains an invalid message.");
+    }
+    if (m.content.length > SHARE_MAX_MESSAGE_CHARS) throw new Error("Shared chat contains an oversized message.");
+    return { role: m.role, content: m.content };
+  });
+  const title = typeof data.title === "string" && data.title.trim() ? data.title.slice(0, 120) : "Shared chat";
+  return { title, messages };
+}
+
+// Accept a full Drive link in any common shape, or a bare file id.
+function extractDriveFileId(input) {
+  const text = String(input || "").trim();
+  if (!text) return null;
+  const patterns = [
+    /drive\.google\.com\/file\/d\/([A-Za-z0-9_-]{10,})/,
+    /drive\.google\.com\/(?:open|uc)\?[^#]*\bid=([A-Za-z0-9_-]{10,})/,
+    /google\.com\/uc\?[^#]*\bid=([A-Za-z0-9_-]{10,})/
+  ];
+  for (const pattern of patterns) {
+    const match = text.match(pattern);
+    if (match) return match[1];
+  }
+  if (/^[A-Za-z0-9_-]{25,}$/.test(text)) return text;
+  return null;
+}
+function buildShareUrl(fileId, baseHref) {
+  const url = new URL(baseHref);
+  url.search = "";
+  url.hash = "";
+  url.searchParams.set(SHARE_PARAM, fileId);
+  return url.toString();
+}
+
+function driveViewUrl(fileId) {
+  return `https://drive.google.com/file/d/${fileId}/view`;
+}
+
+// Direct-download candidates for a publicly shared Drive file, in the
+// order to try them. Small text files normally come straight back; a
+// browser may still be blocked by Drive (CORS / virus-scan interstitial
+// on unusual files) — the caller then falls back to manual import.
+function driveDownloadUrls(fileId) {
+  return [
+    `https://drive.google.com/uc?export=download&id=${encodeURIComponent(fileId)}`,
+    `https://drive.usercontent.google.com/download?id=${encodeURIComponent(fileId)}&export=download&confirm=t`
+  ];
+}
+
+async function fetchSharedChat(fileId, { fetchFn = fetch, readText } = {}) {
+  let lastError = null;
+  for (const url of driveDownloadUrls(fileId)) {
+    try {
+      const res = await fetchFn(url, { credentials: "omit", redirect: "follow" });
+      if (!res || !res.ok) throw new Error(`Drive answered ${res ? res.status : "no response"}`);
+      const text = readText ? await readText(res) : await res.text();
+      return parseSharedChat(text);
+    } catch (err) {
+      lastError = err;
+    }
+  }
+  throw lastError || new Error("Could not load the shared chat from Google Drive.");
+}
+
+// src/core/drive.js
+// Automatic Google Drive sharing (v17 draft, Fahad's chosen method):
+// the user signs in with Google ONCE, and Umrani AI itself uploads the
+// picked chat's file to the user's own Drive, sets it to "anyone with
+// the link", and hands back the file id for the share link. No manual
+// download, upload, or copy-paste. Uses Google Identity Services with
+// the drive.file scope only — the app can see and manage ONLY the
+// files it creates itself, never the rest of the user's Drive.
+// Requires an OAuth Web Client ID (config: GOOGLE_DRIVE_CLIENT_ID),
+// created in the owner's Google Cloud project; it is a public
+// identifier, not a secret.
+const DRIVE_SCOPE = "https://www.googleapis.com/auth/drive.file";
+const GIS_SRC = "https://accounts.google.com/gsi/client";
+const DRIVE_API = "https://www.googleapis.com/drive/v3";
+const DRIVE_UPLOAD_API = "https://www.googleapis.com/upload/drive/v3";
+
+let gisPromise = null;
+function loadGis({ doc = document } = {}) {
+  if (typeof window !== "undefined" && window.google?.accounts?.oauth2) return Promise.resolve(true);
+  if (!gisPromise) {
+    gisPromise = new Promise((resolve) => {
+      const script = doc.createElement("script");
+      script.src = GIS_SRC;
+      script.async = true;
+      script.onload = () => resolve(Boolean(window.google?.accounts?.oauth2));
+      script.onerror = () => resolve(false);
+      doc.head.appendChild(script);
+    });
+  }
+  return gisPromise;
+}
+
+// One access token per session, reused until it nears expiry. GIS
+// issues ~1-hour tokens; a fresh click re-requests silently when the
+// browser still has the Google session.
+let tokenCache = null;
+function requestDriveToken(clientId, { now = Date.now() } = {}) {
+  if (tokenCache && tokenCache.expiresAt - now > 60000) return Promise.resolve(tokenCache.accessToken);
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const done = (fn, value) => { if (!settled) { settled = true; fn(value); } };
+    try {
+      const client = window.google.accounts.oauth2.initTokenClient({
+        client_id: clientId,
+        scope: DRIVE_SCOPE,
+        callback: (resp) => {
+          if (resp && resp.access_token) {
+            tokenCache = { accessToken: resp.access_token, expiresAt: now + (Number(resp.expires_in) || 3600) * 1000 };
+            done(resolve, resp.access_token);
+          } else {
+            done(reject, new Error("Google sign-in did not return an access token."));
+          }
+        },
+        error_callback: (err) => done(reject, new Error("Google sign-in failed: " + (err && err.type ? err.type : "unknown error")))
+      });
+      client.requestAccessToken({ prompt: "" });
+    } catch (err) {
+      done(reject, err);
+    }
+  });
+}
+
+function buildMultipartBody(metadata, content, boundary) {
+  return (
+    `--${boundary}\r\n` +
+    "Content-Type: application/json; charset=UTF-8\r\n\r\n" +
+    JSON.stringify(metadata) + "\r\n" +
+    `--${boundary}\r\n` +
+    "Content-Type: application/json\r\n\r\n" +
+    content + "\r\n" +
+    `--${boundary}--`
+  );
+}
+
+async function uploadFileToDrive(accessToken, filename, content, { fetchFn = fetch } = {}) {
+  const boundary = "umrani_" + Math.random().toString(36).slice(2) + Date.now().toString(36);
+  const body = buildMultipartBody({ name: filename, mimeType: "application/json" }, content, boundary);
+  const res = await fetchFn(`${DRIVE_UPLOAD_API}/files?uploadType=multipart&fields=id`, {
+    method: "POST",
+    headers: { Authorization: "Bearer " + accessToken, "Content-Type": `multipart/related; boundary=${boundary}` },
+    body
+  });
+  if (!res || !res.ok) throw new Error(`Drive upload failed (${res ? res.status : "no response"})`);
+  const data = await res.json();
+  if (!data || typeof data.id !== "string" || !data.id) throw new Error("Drive upload did not return a file id.");
+  return data.id;
+}
+
+async function makeFilePublic(accessToken, fileId, { fetchFn = fetch } = {}) {
+  const res = await fetchFn(`${DRIVE_API}/files/${encodeURIComponent(fileId)}/permissions?fields=id`, {
+    method: "POST",
+    headers: { Authorization: "Bearer " + accessToken, "Content-Type": "application/json" },
+    body: JSON.stringify({ type: "anyone", role: "reader" })
+  });
+  if (!res || !res.ok) throw new Error(`Could not set the file's sharing (${res ? res.status : "no response"})`);
+}
+
+// Full pipeline: sign in -> upload this chat's file -> make it
+// link-readable -> the Drive file id for the Umrani AI share link.
+async function shareChatViaDrive(clientId, filename, content, deps = {}) {
+  const loaded = await (deps.loadGisFn || loadGis)();
+  if (!loaded) throw new Error("Google sign-in could not be loaded. Check your internet connection and try again.");
+  const token = await (deps.requestTokenFn || requestDriveToken)(clientId);
+  const fileId = await uploadFileToDrive(token, filename, content, deps);
+  await makeFilePublic(token, fileId, deps);
+  return fileId;
+}
 
 // src/api/client.js
 /* Pure streaming-response helpers used by the API layer. */
@@ -901,14 +1178,20 @@ function initAdsterraCloseButton() {
 
 
 
+
+
 const HIGH_LOAD_MESSAGE = "Umrani AI is under high load. Please wait.";
 const MODEL_RECHECK_INTERVAL_MS = 5 * 60 * 1000;
 const MODEL_TEST_TIMEOUT_MS = 3000;
-// The pool is the Dahl tier only: the startup probe and the normal chat
-// rotation pick the fastest healthy Dahl model across the Dahl providers.
-// The Gemini providers are a fallback tier (see streamCompletion) and are
-// never probed or rotated into while Dahl is healthy.
+// Every configured model — the three Dahl models and the three Gemini
+// models — is checked in the startup probe (see testModelsAndPick), but
+// the fallback order is FIXED by provider, never by probe speed
+// (Fahad's order, v16): Provider 1 (Dahl) models are always tried first,
+// in their configured order; only when all of them fail does chat move
+// to Provider 2 (Gemini), again in configured order.
 const MODEL_POOL = [PRIMARY_MODEL, FALLBACK_MODEL, SECOND_FALLBACK_MODEL];
+const GEMINI_MODEL_POOL = [GEMINI_PRIMARY_MODEL, GEMINI_FALLBACK_MODEL, GEMINI_SECOND_FALLBACK_MODEL];
+const ALL_MODELS = [...MODEL_POOL, ...GEMINI_MODEL_POOL];
 const UI_MODEL_NAME = "Umrani 2.1";
 const DEEP_THINK_KEY = "umrani-deep-think";
 
@@ -946,6 +1229,9 @@ function initDom() {
   dom.emptyState = document.getElementById(EMPTY_STATE_ELEMENT_ID);
   dom.streamStatus = document.getElementById(STREAM_STATUS_ELEMENT_ID);
   dom.modelLoadingOverlay = document.getElementById("modelLoadingOverlay");
+  dom.sharedBanner = document.getElementById("sharedBanner");
+  dom.sharedSaveBtn = document.getElementById("sharedSaveBtn");
+  dom.sharedCloseBtn = document.getElementById("sharedCloseBtn");
   dom.composerModelLabel = document.getElementById("composerModelLabel");
   dom.messageInput = document.getElementById(MESSAGE_INPUT_ELEMENT_ID);
   dom.sendBtn = document.getElementById(SEND_BUTTON_ELEMENT_ID);
@@ -976,7 +1262,9 @@ const state = {
   fileReading: false,
   activeRequestChatId: null,
   controller: null,        // AbortController for current request
+  sharedView: null,        // a chat opened from a share link (read-only; not in IndexedDB)
   activeModel: SECOND_FALLBACK_MODEL,
+  modelChain: null,        // every model in fixed provider order (Dahl first, then Gemini)
   modelsTested: false,
   modelTesting: false,
   stopRequested: false,
@@ -986,9 +1274,16 @@ const state = {
 // Owner-approved direct Native Banner. It executes with page/storage access.
 
 /* ---------- Model testing / auto-selection ----------
-   The exact model identity is hidden from users. On startup Umrani AI probes
-   each model once, chooses the FASTEST available model, and keeps the full
-   pool as a fallback chain if the active model ever fails. */
+   The exact model identity is hidden from users. On startup (and on every
+   page refresh, reconnect, tab return and 5-minute recheck) Umrani AI
+   checks EVERY configured model — Dahl and Gemini alike — and the first
+   check runs on the loading screen, which says what it is doing. The
+   check only records which models are working; it NEVER reorders them.
+   The fallback chain always follows the fixed provider order: all of
+   Provider 1's (Dahl) models in configured order, then Provider 2's
+   (Gemini) models. Models the latest check found working keep that
+   provider order at the front of the chain; models that did not answer
+   keep the same provider order at the end, as a last resort. */
 function showModelLoading() {
   if (!dom.modelLoadingOverlay) return;
   dom.modelLoadingOverlay.hidden = false;
@@ -1009,13 +1304,25 @@ async function testModelsAndPick() {
   if (state.modelTesting) return;
   state.modelTesting = true;
   // Only the first run blocks the UI with the loading screen; background
-  // rechecks (every few minutes) must stay invisible.
+  // rechecks (every few minutes) must stay invisible. The loading screen
+  // shows no text at all — only the Umrani logo and the loading bar
+  // (Fahad's order, v16).
   if (!state.modelsTested) showModelLoading();
   try {
-    const results = await Promise.all(MODEL_POOL.map((model) => probeModelTimed(model)));
-    const healthy = results.filter(Boolean).sort((a, b) => a.ms - b.ms);
-    if (healthy.length > 0) {
-      state.activeModel = healthy[0].model;
+    const results = await Promise.all(ALL_MODELS.map((model) => probeModelTimed(model)));
+    // Promise.all preserves ALL_MODELS order, so the healthy list is
+    // already in fixed provider order — no speed sorting (v16 change).
+    const healthyModels = results.filter(Boolean).map((r) => r.model);
+    if (healthyModels.length > 0) {
+      // Working models first, in provider order. Models that did not
+      // answer the check keep their provider order at the end of the
+      // chain, so they are still tried as a last resort before a
+      // request gives up.
+      state.modelChain = [
+        ...healthyModels,
+        ...ALL_MODELS.filter((model) => !healthyModels.includes(model))
+      ];
+      state.activeModel = state.modelChain[0];
     }
   } finally {
     state.modelTesting = false;
@@ -1400,6 +1707,7 @@ async function createChat() {
     console.warn("Failed to persist new chat", err);
   }
   state.currentChatId = chat.id;
+  exitSharedView();
   renderChatList();
   renderActiveChat();
   if (!isDesktopSidebar()) closeSidebar();
@@ -1411,11 +1719,12 @@ async function createChat() {
 }
 
 async function openChat(id) {
-  if (state.currentChatId === id) return;
+  if (state.currentChatId === id && !state.sharedView) return;
   // If a request is streaming, it keeps writing to its own chat id.
   const chat = getChat(id);
   if (!chat) return;
   state.currentChatId = id;
+  exitSharedView();
   // cancel any streaming UI tied to old chat (in-flight request continues to its chat)
   renderChatList();
   renderActiveChat();
@@ -1483,19 +1792,20 @@ function renderChatList(filterText) {
     title.className = "ci-title";
     title.textContent = chat.title || "New Chat";
 
-    const del = document.createElement("button");
-    del.className = "ci-del";
-    del.type = "button";
-    del.setAttribute("aria-label", "Delete chat: " + chat.title);
-    del.innerHTML = iconSvg("trash", 16);
-    del.addEventListener("click", (e) => {
+    const more = document.createElement("button");
+    more.className = "ci-more";
+    more.type = "button";
+    more.setAttribute("aria-label", "Chat options: " + chat.title);
+    more.setAttribute("aria-haspopup", "menu");
+    more.innerHTML = iconSvg("more", 16);
+    more.addEventListener("click", (e) => {
       e.stopPropagation();
-      deleteChat(chat.id);
+      openChatMenu(chat, more);
     });
-    del.addEventListener("keydown", (e) => e.stopPropagation());
+    more.addEventListener("keydown", (e) => e.stopPropagation());
 
     row.appendChild(title);
-    row.appendChild(del);
+    row.appendChild(more);
 
     const open = () => openChat(chat.id);
     row.addEventListener("click", open);
@@ -1522,6 +1832,317 @@ async function persistLastChat() {
   }
 }
 
+/* ---------- Chat options menu (three dots on each sidebar chat) ----------
+   One small popup at a time: Share chat / Delete chat. */
+let openMenuEl = null;
+function closeChatMenu() {
+  if (openMenuEl) { openMenuEl.remove(); openMenuEl = null; }
+  document.removeEventListener("click", onMenuOutsideClick, true);
+  document.removeEventListener("keydown", onMenuKey, true);
+}
+function onMenuOutsideClick(e) {
+  if (openMenuEl && !openMenuEl.contains(e.target)) closeChatMenu();
+}
+function onMenuKey(e) {
+  if (e.key === "Escape") closeChatMenu();
+}
+function openChatMenu(chat, anchorBtn) {
+  if (openMenuEl) { const wasMine = openMenuEl.dataset.chatId === chat.id; closeChatMenu(); if (wasMine) return; }
+  const menu = document.createElement("div");
+  menu.className = "chat-menu";
+  menu.setAttribute("role", "menu");
+  menu.dataset.chatId = chat.id;
+
+  const shareItem = document.createElement("button");
+  shareItem.type = "button";
+  shareItem.className = "chat-menu-item";
+  shareItem.setAttribute("role", "menuitem");
+  shareItem.innerHTML = iconSvg("share", 16);
+  const shareLabel = document.createElement("span");
+  shareLabel.textContent = "Share chat";
+  shareItem.appendChild(shareLabel);
+  shareItem.addEventListener("click", () => { closeChatMenu(); startShareFlow(chat); });
+
+  const delItem = document.createElement("button");
+  delItem.type = "button";
+  delItem.className = "chat-menu-item danger";
+  delItem.setAttribute("role", "menuitem");
+  delItem.innerHTML = iconSvg("trash", 16);
+  const delLabel = document.createElement("span");
+  delLabel.textContent = "Delete chat";
+  delItem.appendChild(delLabel);
+  delItem.addEventListener("click", () => { closeChatMenu(); deleteChat(chat.id); });
+
+  menu.appendChild(shareItem);
+  menu.appendChild(delItem);
+  document.body.appendChild(menu);
+  const rect = anchorBtn.getBoundingClientRect();
+  menu.style.top = (rect.bottom + 4) + "px";
+  menu.style.left = Math.max(8, Math.min(rect.right - menu.offsetWidth, window.innerWidth - menu.offsetWidth - 8)) + "px";
+  openMenuEl = menu;
+  document.addEventListener("click", onMenuOutsideClick, true);
+  document.addEventListener("keydown", onMenuKey, true);
+}
+
+/* ---------- Chat sharing (v17 draft) ----------
+   Sender: this dialog packs ONLY the picked chat into one file, the
+   user uploads it to their own Google Drive, pastes the Drive link
+   back, and gets Umrani AI's own share link plus a QR code of it.
+   Receiver: handled by openSharedLink() at startup. */
+let qrLibPromise = null;
+function loadQrLib() {
+  if (window.QRCode) return Promise.resolve(true);
+  if (!qrLibPromise) {
+    qrLibPromise = new Promise((resolve) => {
+      const script = document.createElement("script");
+      script.src = "https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js";
+      script.onload = () => resolve(Boolean(window.QRCode));
+      script.onerror = () => resolve(false);
+      document.head.appendChild(script);
+    });
+  }
+  return qrLibPromise;
+}
+
+function downloadBlob(blob, filename) {
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+// Fahad's chosen method (v17 draft): FULLY automatic Drive sharing.
+// The user signs in with Google once; Umrani AI itself uploads this
+// chat's file to the user's own Drive, sets it to "anyone with the
+// link", and shows the Umrani AI share link + QR. No manual download,
+// upload, or copy-paste anywhere in the flow.
+function startShareFlow(chat) {
+  openShareDialog(chat);
+}
+
+function openShareDialog(chat) {
+  const previousFocus = document.activeElement;
+  const overlay = document.createElement("div");
+  overlay.className = "overlay confirm-overlay show";
+  overlay.style.zIndex = "106";
+  const finish = () => { overlay.remove(); previousFocus?.focus(); };
+  overlay.addEventListener("click", (e) => { if (e.target === overlay) finish(); });
+
+  const card = document.createElement("div");
+  card.className = "confirm-card share-card";
+  card.setAttribute("role", "dialog");
+  card.setAttribute("aria-modal", "true");
+  card.setAttribute("aria-label", "Share chat");
+
+  const heading = document.createElement("h2");
+  heading.className = "share-heading";
+  heading.textContent = "Share this chat";
+
+  const intro = document.createElement("p");
+  intro.className = "share-text";
+  intro.textContent = "Only this chat is shared — your other chats never leave your browser. The file goes to YOUR Google Drive; Umrani AI has no server.";
+
+  const status = document.createElement("p");
+  status.className = "share-step";
+
+  const error = document.createElement("p");
+  error.className = "share-error";
+  error.hidden = true;
+
+  const result = document.createElement("div");
+  result.className = "share-result";
+  result.hidden = true;
+
+  const linkOut = document.createElement("input");
+  linkOut.type = "text";
+  linkOut.readOnly = true;
+  linkOut.className = "share-input";
+  linkOut.setAttribute("aria-label", "Your Umrani AI share link");
+
+  const copyBtn = document.createElement("button");
+  copyBtn.type = "button";
+  copyBtn.className = "share-secondary";
+  copyBtn.textContent = "Copy link";
+  copyBtn.addEventListener("click", async () => {
+    const ok = await copyText(linkOut.value);
+    showToast(ok ? "Share link copied." : "Copy failed — long-press the link to copy it.");
+  });
+
+  const qrBox = document.createElement("div");
+  qrBox.className = "share-qr";
+  const qrNote = document.createElement("p");
+  qrNote.className = "share-text";
+  qrNote.textContent = "Or share this QR code — it opens the same link.";
+
+  result.appendChild(linkOut);
+  result.appendChild(copyBtn);
+  result.appendChild(qrBox);
+  result.appendChild(qrNote);
+
+  const showResult = async (fileId) => {
+    const shareUrl = buildShareUrl(fileId, window.location.href);
+    linkOut.value = shareUrl;
+    result.hidden = false;
+    qrBox.textContent = "";
+    qrNote.textContent = "Or share this QR code — it opens the same link.";
+    const hasQr = await loadQrLib();
+    if (hasQr) {
+      try {
+        new window.QRCode(qrBox, { text: shareUrl, width: 176, height: 176, correctLevel: window.QRCode.CorrectLevel.M });
+      } catch { qrNote.textContent = "QR code could not be made — the link above works the same."; }
+    } else {
+      qrNote.textContent = "QR code needs an internet connection — the link above works the same.";
+    }
+  };
+
+  const shareBtn = document.createElement("button");
+  shareBtn.type = "button";
+  shareBtn.className = "share-primary";
+  shareBtn.textContent = "Sign in with Google & share";
+  shareBtn.addEventListener("click", async () => {
+    error.hidden = true;
+    shareBtn.disabled = true;
+    status.textContent = "Signing in to Google, then uploading this chat to your Drive…";
+    try {
+      const fileId = await shareChatViaDrive(GOOGLE_DRIVE_CLIENT_ID, shareFileName(chat), serializeShareFile(chat));
+      status.textContent = "Done — this chat is on your Google Drive, set to “anyone with the link”. Share the link or QR below:";
+      await showResult(fileId);
+    } catch (err) {
+      console.warn("Automatic Drive sharing failed:", err);
+      status.textContent = "";
+      error.textContent = "Sharing did not finish: " + (err && err.message ? err.message : "something went wrong") + " You can try again.";
+      error.hidden = false;
+      shareBtn.disabled = false;
+    }
+  });
+
+  const closeBtn = document.createElement("button");
+  closeBtn.type = "button";
+  closeBtn.className = "share-secondary";
+  closeBtn.textContent = "Close";
+  closeBtn.addEventListener("click", finish);
+
+  card.appendChild(heading);
+  card.appendChild(intro);
+  if (GOOGLE_DRIVE_CLIENT_ID) {
+    card.appendChild(status);
+    card.appendChild(shareBtn);
+  } else {
+    const setupNote = document.createElement("p");
+    setupNote.className = "share-step";
+    setupNote.textContent = "Automatic Google Drive sharing is not set up yet. It needs a Google Client ID from the site owner's Google Cloud project (one-time, free). Until then, sharing stays off.";
+    card.appendChild(setupNote);
+  }
+  card.appendChild(error);
+  card.appendChild(result);
+  card.appendChild(closeBtn);
+  overlay.appendChild(card);
+  document.body.appendChild(overlay);
+  (GOOGLE_DRIVE_CLIENT_ID ? shareBtn : closeBtn).focus();
+}
+
+function exitSharedView() {
+  if (!state.sharedView) return;
+  state.sharedView = null;
+  if (dom.sharedBanner) dom.sharedBanner.hidden = true;
+}
+
+async function saveSharedCopy() {
+  const shared = state.sharedView;
+  if (!shared) return;
+  const now = Date.now();
+  const chat = {
+    id: makeId(),
+    title: shared.title || "Shared chat",
+    messages: shared.messages.map((m) => ({ role: m.role, content: m.content })),
+    createdAt: now,
+    updatedAt: now
+  };
+  state.chats.unshift(chat);
+  try { await persistChat(chat); } catch (err) { console.warn("Failed to save shared chat", err); }
+  exitSharedView();
+  state.currentChatId = chat.id;
+  renderChatList();
+  renderActiveChat();
+  persistLastChat();
+  updateComposerState();
+  showToast("Chat saved — you can continue it now.");
+}
+
+function showSharedError(fileId) {
+  if (dom.sharedBanner) dom.sharedBanner.hidden = true;
+  dom.emptyState.hidden = true;
+  const msgsEl = dom.messages;
+  msgsEl.textContent = "";
+  const box = document.createElement("div");
+  box.className = "shared-error";
+  const text = document.createElement("p");
+  text.textContent = "This shared chat could not be loaded automatically. Google Drive may be blocking the direct read, or the file's sharing is not set to “Anyone with the link”.";
+  box.appendChild(text);
+  if (fileId) {
+    const openLink = document.createElement("a");
+    openLink.className = "share-primary shared-error-btn";
+    openLink.href = driveViewUrl(fileId);
+    openLink.target = "_blank";
+    openLink.rel = "noopener noreferrer";
+    openLink.textContent = "Open the file in Google Drive";
+    box.appendChild(openLink);
+  }
+  const hint = document.createElement("p");
+  hint.textContent = "Download the file from Drive, then import it here:";
+  box.appendChild(hint);
+  const importBtn = document.createElement("button");
+  importBtn.type = "button";
+  importBtn.className = "share-secondary";
+  importBtn.textContent = "Import downloaded chat file";
+  importBtn.addEventListener("click", () => {
+    const picker = document.createElement("input");
+    picker.type = "file";
+    picker.accept = ".json,application/json";
+    picker.addEventListener("change", async () => {
+      const file = picker.files && picker.files[0];
+      if (!file) return;
+      try {
+        const parsed = parseSharedChat(await file.text());
+        state.sharedView = parsed;
+        renderActiveChat();
+        updateComposerState();
+      } catch (err) {
+        showToast(err && err.message ? err.message : "That file could not be read.");
+      }
+    });
+    picker.click();
+  });
+  box.appendChild(importBtn);
+  msgsEl.appendChild(box);
+}
+
+async function openSharedLink() {
+  let fileId = null;
+  try { fileId = new URLSearchParams(window.location.search).get(SHARE_PARAM); } catch { /* ignore */ }
+  if (!fileId) return;
+  dom.emptyState.hidden = true;
+  dom.messages.textContent = "";
+  const loading = document.createElement("p");
+  loading.className = "shared-loading";
+  loading.textContent = "Loading shared chat…";
+  dom.messages.appendChild(loading);
+  try {
+    const shared = await fetchSharedChat(fileId);
+    state.sharedView = shared;
+    state.currentChatId = null;
+    renderActiveChat();
+    updateComposerState();
+  } catch (err) {
+    console.warn("Shared chat load failed:", err);
+    showSharedError(fileId);
+  }
+}
+
 async function restoreLastChat() {
   try {
     const rec = await dbGet(APP_STATE_STORE, "lastChatId");
@@ -1541,6 +2162,27 @@ async function restoreLastChat() {
    target="_blank" rel="noopener noreferrer".
    ========================================================== */
 function renderActiveChat() {
+  // A chat opened from a share link is not one of the visitor's stored
+  // chats: render the shared copy read-only, with its banner.
+  if (state.sharedView) {
+    const msgsEl = dom.messages;
+    const adShell = document.getElementById("adsterraAdShell");
+    if (adShell && msgsEl.contains(adShell)) {
+      adShell.hidden = true;
+      dom.chatArea.parentNode.insertBefore(adShell, dom.chatArea);
+    }
+    msgsEl.textContent = "";
+    dom.emptyState.hidden = true;
+    if (dom.sharedBanner) dom.sharedBanner.hidden = false;
+    const frag = document.createDocumentFragment();
+    for (const m of state.sharedView.messages || []) {
+      frag.appendChild(buildMessageEl(m, null));
+    }
+    msgsEl.appendChild(frag);
+    scrollToBottom(false);
+    return;
+  }
+  if (dom.sharedBanner) dom.sharedBanner.hidden = true;
   const chat = getChat(state.currentChatId);
   const msgsEl = dom.messages;
   // The reusable ad shell is temporarily mounted inside the message feed.
@@ -2336,6 +2978,19 @@ function attachmentForApi(attachment) {
 
 /* ---------- Composer enable/disable ---------- */
 function updateComposerState() {
+  // A shared chat is read-only: the composer stays disabled until the
+  // visitor saves it as their own copy.
+  if (state.sharedView) {
+    dom.sendBtn.disabled = true;
+    dom.messageInput.disabled = true;
+    dom.messageInput.placeholder = "Shared chat is read-only — save it to continue";
+    if (dom.micBtn) dom.micBtn.disabled = true;
+    dom.sendBtn.hidden = false;
+    if (dom.stopBtn) dom.stopBtn.hidden = true;
+    return;
+  }
+  dom.messageInput.disabled = false;
+  dom.messageInput.placeholder = "Write a message…";
   // Only streaming blocks sending; ads no longer lock the composer.
   const canSend = !state.isStreaming && !state.fileReading &&
     (dom.messageInput.value.trim().length > 0 || Boolean(state.pendingAttachment));
@@ -2656,21 +3311,19 @@ function stopStreaming() {
 }
 
 function streamCompletion(apiMessages) {
-  // Auto-selected model first, then the rest of the pool. The real model IDs
-  // are never surfaced to users; only the "Umrani 2.1" brand is shown.
+  // Chat follows the FIXED provider order (v16): Provider 1 (Dahl)
+  // models first, in configured order, then Provider 2 (Gemini). If a
+  // model fails, the next model OF THE SAME PROVIDER is tried before
+  // chat ever moves to the next provider; attemptPass only ever pairs a
+  // model with a provider account that carries it, and each model's
+  // accounts are tried in configured order (Dahl key #1, #2, #3). The
+  // chain is NOT re-sorted by speed and the last successful model is
+  // NOT moved to the front — every turn starts again at Provider 1.
+  // The real model IDs are never surfaced to users; only the
+  // "Umrani 2.1" brand is shown.
   const providers = API_PROVIDERS.filter(isProviderConfigured);
-  // Provider tiers: a provider belongs to the Dahl tier when it carries pool
-  // (Dahl) models; every other configured provider — the two Google Gemini
-  // entries — forms the fallback tier. The Dahl tier is always exhausted
-  // first; the fallback tier is tried only when every Dahl attempt failed.
-  const dahlTier = providers.filter((p) => getProviderModels(p).some((m) => MODEL_POOL.includes(m)));
-  const fallbackTier = providers.filter((p) => !dahlTier.includes(p));
-  const modelOrder = [
-    state.activeModel,
-    ...MODEL_POOL.filter((model) => model !== state.activeModel)
-  ].filter(Boolean);
-  // Fallback models in the providers' own order (fastest first).
-  const fallbackModelOrder = [...new Set(fallbackTier.flatMap((p) => getProviderModels(p)))];
+  const chain = state.modelChain && state.modelChain.length > 0 ? state.modelChain : ALL_MODELS;
+  const modelOrder = chain.filter((model) => ALL_MODELS.includes(model));
 
   return (async () => {
     let lastErr = null;
@@ -2678,7 +3331,7 @@ function streamCompletion(apiMessages) {
     // Silent recovery from a mid-stream drop: when a stream fails AFTER
     // answer text arrived, the partial text is kept safe here and the
     // fallback chain automatically retries the request (up to
-    // MAX_PARTIAL_RETRIES times across both provider tiers). No error
+    // MAX_PARTIAL_RETRIES times across the whole chain). No error
     // or "interrupted" notice is ever shown to the user; if every
     // automatic attempt fails, the longest partial reply is kept as an
     // ordinary message with no label attached.
@@ -2740,16 +3393,13 @@ function streamCompletion(apiMessages) {
       return null;
     };
 
-    const dahlResult = await attemptPass(modelOrder, dahlTier);
-    if (dahlResult) return dahlResult;
-
-    // The whole Dahl tier failed: shift to the Gemini fallback tier, still
-    // inside the same request budget (attemptPass honours the deadline and
-    // the Stop button). For each model, Gemini key #1 is tried before key #2.
-    if (fallbackTier.length > 0 && !state.stopRequested) {
-      const fallbackResult = await attemptPass(fallbackModelOrder, fallbackTier);
-      if (fallbackResult) return fallbackResult;
-    }
+    // One pass over the whole provider-ordered chain, still inside the
+    // same request budget (attemptPass honours the deadline and the
+    // Stop button). For each model, its provider accounts are tried in
+    // configured order — Dahl key #1 before #2 before #3, Gemini key
+    // #1 before #2.
+    const chainResult = await attemptPass(modelOrder, providers);
+    if (chainResult) return chainResult;
 
     if (state.stopRequested) {
       const stopped = new Error("Stopped by user.");
@@ -3230,6 +3880,12 @@ function autoGrowInput() {
 
 function initEventListeners() {
   document.getElementById("brandHome")?.addEventListener("click", () => { if (!state.isStreaming) createChat(); });
+  if (dom.sharedSaveBtn) dom.sharedSaveBtn.addEventListener("click", saveSharedCopy);
+  if (dom.sharedCloseBtn) dom.sharedCloseBtn.addEventListener("click", () => {
+    exitSharedView();
+    renderActiveChat();
+    updateComposerState();
+  });
   // Composer input
   dom.messageInput.addEventListener("input", autoGrowInput);
   dom.messageInput.addEventListener("keydown", (e) => {
@@ -3385,6 +4041,7 @@ async function init() {
   renderChatList();
   renderActiveChat();
   updateComposerState();
+  openSharedLink();
   autoGrowInput();
 
   window.setInterval(() => {
