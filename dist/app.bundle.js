@@ -80,6 +80,12 @@ const OUTPUT_RESERVE_TOKENS = 2048;
 // says so instead of failing.
 const GOOGLE_DRIVE_CLIENT_ID = "307112318338-r3b5lkto0e2v4prrisfnjeamp55e2nle.apps.googleusercontent.com";
 
+// Public browser API key for READING shared chat files back from Drive.
+// Restricted in Google Cloud to the Drive API and to referrers from
+// https://umraniai.devs.li only, so it can do nothing except read files
+// that are already shared as "anyone with the link". Not a secret.
+const GOOGLE_DRIVE_API_KEY = "AIzaSyANnDwC42XS4FKR_YJXedL6KGiGfj7oAGY";
+
 // src/ui/icons.js
 // Local 24px-grid icon system. All SVG markup is a trusted constant, never AI/user text.
 const ICON_PATHS = Object.freeze({
@@ -385,16 +391,21 @@ function driveViewUrl(fileId) {
 // order to try them. Small text files normally come straight back; a
 // browser may still be blocked by Drive (CORS / virus-scan interstitial
 // on unusual files) — the caller then falls back to manual import.
-function driveDownloadUrls(fileId) {
-  return [
-    `https://drive.google.com/uc?export=download&id=${encodeURIComponent(fileId)}`,
-    `https://drive.usercontent.google.com/download?id=${encodeURIComponent(fileId)}&export=download&confirm=t`
-  ];
+function driveDownloadUrls(fileId, apiKey = "") {
+  const id = encodeURIComponent(fileId);
+  const urls = [];
+  // Most reliable read for a public file: the Drive API media download.
+  // It answers with proper CORS headers, unlike the web download hosts,
+  // which some browsers (Edge tracking prevention) block outright.
+  if (apiKey) urls.push(`https://www.googleapis.com/drive/v3/files/${id}?alt=media&key=${encodeURIComponent(apiKey)}`);
+  urls.push(`https://drive.usercontent.google.com/download?id=${id}&export=download&confirm=t`);
+  urls.push(`https://drive.google.com/uc?export=download&id=${id}`);
+  return urls;
 }
 
-async function fetchSharedChat(fileId, { fetchFn = fetch, readText } = {}) {
+async function fetchSharedChat(fileId, { fetchFn = fetch, readText, apiKey = "" } = {}) {
   let lastError = null;
-  for (const url of driveDownloadUrls(fileId)) {
+  for (const url of driveDownloadUrls(fileId, apiKey)) {
     try {
       const res = await fetchFn(url, { credentials: "omit", redirect: "follow" });
       if (!res || !res.ok) throw new Error(`Drive answered ${res ? res.status : "no response"}`);
@@ -2073,7 +2084,7 @@ async function saveSharedCopy() {
   showToast("Chat saved — you can continue it now.");
 }
 
-function showSharedError(fileId) {
+function showSharedError(fileId, err) {
   if (dom.sharedBanner) dom.sharedBanner.hidden = true;
   dom.emptyState.hidden = true;
   const msgsEl = dom.messages;
@@ -2091,6 +2102,12 @@ function showSharedError(fileId) {
     openLink.rel = "noopener noreferrer";
     openLink.textContent = "Open the file in Google Drive";
     box.appendChild(openLink);
+  }
+  if (err && err.message) {
+    const detail = document.createElement("p");
+    detail.className = "shared-error-detail";
+    detail.textContent = "Details: " + err.message;
+    box.appendChild(detail);
   }
   const hint = document.createElement("p");
   hint.textContent = "Download the file from Drive, then import it here:";
@@ -2132,14 +2149,14 @@ async function openSharedLink() {
   loading.textContent = "Loading shared chat…";
   dom.messages.appendChild(loading);
   try {
-    const shared = await fetchSharedChat(fileId);
+    const shared = await fetchSharedChat(fileId, { apiKey: GOOGLE_DRIVE_API_KEY });
     state.sharedView = shared;
     state.currentChatId = null;
     renderActiveChat();
     updateComposerState();
   } catch (err) {
     console.warn("Shared chat load failed:", err);
-    showSharedError(fileId);
+    showSharedError(fileId, err);
   }
 }
 

@@ -396,6 +396,7 @@ input, textarea { font-family: inherit; }
   align-items: flex-start;
 }
 .shared-error-btn { text-decoration: none; }
+.shared-error-detail { font-size: 12px; opacity: 0.65; word-break: break-word; }
 .chat-list-empty {
   color: var(--text-muted);
   font-size: 0.82rem;
