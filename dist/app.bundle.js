@@ -1955,7 +1955,7 @@ function openShareDialog(chat) {
 
   const intro = document.createElement("p");
   intro.className = "share-text";
-  intro.textContent = "Only this chat is shared — your other chats never leave your browser. The file goes to YOUR Google Drive; Umrani AI has no server.";
+  intro.textContent = "Only the selected conversation is shared. All other conversations remain private and never leave your browser. This conversation is uploaded to your own Google Drive account and shared from there, as Umrani AI operates entirely without a server.";
 
   const status = document.createElement("p");
   status.className = "share-step";
@@ -1980,14 +1980,14 @@ function openShareDialog(chat) {
   copyBtn.textContent = "Copy link";
   copyBtn.addEventListener("click", async () => {
     const ok = await copyText(linkOut.value);
-    showToast(ok ? "Share link copied." : "Copy failed — long-press the link to copy it.");
+    showToast(ok ? "The share link has been copied." : "The link could not be copied automatically. Please copy it manually.");
   });
 
   const qrBox = document.createElement("div");
   qrBox.className = "share-qr";
   const qrNote = document.createElement("p");
   qrNote.className = "share-text";
-  qrNote.textContent = "Or share this QR code — it opens the same link.";
+  qrNote.textContent = "Alternatively, you may share the following QR code, which opens the same link.";
 
   result.appendChild(linkOut);
   result.appendChild(copyBtn);
@@ -1999,14 +1999,14 @@ function openShareDialog(chat) {
     linkOut.value = shareUrl;
     result.hidden = false;
     qrBox.textContent = "";
-    qrNote.textContent = "Or share this QR code — it opens the same link.";
+    qrNote.textContent = "Alternatively, you may share the following QR code, which opens the same link.";
     const hasQr = await loadQrLib();
     if (hasQr) {
       try {
         new window.QRCode(qrBox, { text: shareUrl, width: 176, height: 176, correctLevel: window.QRCode.CorrectLevel.M });
-      } catch { qrNote.textContent = "QR code could not be made — the link above works the same."; }
+      } catch { qrNote.textContent = "The QR code could not be generated. The link above provides the same access."; }
     } else {
-      qrNote.textContent = "QR code needs an internet connection — the link above works the same.";
+      qrNote.textContent = "The QR code requires an internet connection. The link above provides the same access.";
     }
   };
 
@@ -2017,15 +2017,15 @@ function openShareDialog(chat) {
   shareBtn.addEventListener("click", async () => {
     error.hidden = true;
     shareBtn.disabled = true;
-    status.textContent = "Signing in to Google, then uploading this chat to your Drive…";
+    status.textContent = "Please wait. You are being signed in to Google, after which this conversation will be uploaded to your Google Drive.";
     try {
       const fileId = await shareChatViaDrive(GOOGLE_DRIVE_CLIENT_ID, shareFileName(chat), serializeShareFile(chat));
-      status.textContent = "Done — this chat is on your Google Drive, set to “anyone with the link”. Share the link or QR below:";
+      status.textContent = "The conversation has been uploaded to your Google Drive and set to “Anyone with the link”. You may share it using the link or the QR code below.";
       await showResult(fileId);
     } catch (err) {
       console.warn("Automatic Drive sharing failed:", err);
       status.textContent = "";
-      error.textContent = "Sharing did not finish: " + (err && err.message ? err.message : "something went wrong") + " You can try again.";
+      error.textContent = "Sharing could not be completed: " + (err && err.message ? err.message : "an unexpected error occurred") + " Please try again.";
       error.hidden = false;
       shareBtn.disabled = false;
     }
@@ -2045,7 +2045,7 @@ function openShareDialog(chat) {
   } else {
     const setupNote = document.createElement("p");
     setupNote.className = "share-step";
-    setupNote.textContent = "Automatic Google Drive sharing is not set up yet. It needs a Google Client ID from the site owner's Google Cloud project (one-time, free). Until then, sharing stays off.";
+    setupNote.textContent = "Automatic sharing via Google Drive is not yet configured. A Google Client ID from the site owner's Google Cloud project is required to enable this feature.";
     card.appendChild(setupNote);
   }
   card.appendChild(error);
