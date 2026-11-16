@@ -52,15 +52,17 @@ const API_PROVIDERS = [
     models: [PRIMARY_MODEL, FALLBACK_MODEL, SECOND_FALLBACK_MODEL]
   },
   {
+    // Gemini accounts: fresh AI Studio keys supplied by Fahad
+    // 2026-11-16, both verified live (HTTP 200 on all three models).
     name: "Google Gemini",
     url: GEMINI_CHAT_COMPLETIONS_URL,
-    key: 'AQ.Ab8RN6K9dqWP2-llRI__hjbvzKn6k2tO9Weapvd1QnKYa6Ktvw',
+    key: 'AQ.Ab8RN6KrPPBE3qiu7s--cpS_O8f_eQZ4q2PRPnRxRLsl15bzyA',
     models: [GEMINI_PRIMARY_MODEL, GEMINI_FALLBACK_MODEL, GEMINI_SECOND_FALLBACK_MODEL]
   },
   {
     name: "Google Gemini 2",
     url: GEMINI_CHAT_COMPLETIONS_URL,
-    key: 'AQ.Ab8RN6IZhZBE1T2J3VjI5zcVvAatju-ss4LeiO_3IWwayMF6TA',
+    key: 'AQ.Ab8RN6IfvQPW2GGfmWmmn8ZgRbei35U9aFkAd65CT7Elp4DKHQ',
     models: [GEMINI_PRIMARY_MODEL, GEMINI_FALLBACK_MODEL, GEMINI_SECOND_FALLBACK_MODEL]
   }
 ];
@@ -2217,12 +2219,16 @@ function renderActiveChat() {
     dom.emptyState.hidden = false;
     return;
   }
-  dom.emptyState.hidden = true;
+  // A new (still empty) chat shows the Umrani AI welcome too: hide it
+  // only once a visible message exists. Before this fix every New Chat
+  // hid the welcome, so a fresh chat looked blank.
+  const visibleMessages = (chat.messages || []).filter(
+    (m) => m.role !== SYSTEM_ROLE && !(m.role === AI_ROLE && !m.content)
+  );
+  dom.emptyState.hidden = visibleMessages.length > 0;
 
   const frag = document.createDocumentFragment();
-  for (const m of chat.messages || []) {
-    if (m.role === SYSTEM_ROLE) continue;
-    if (m.role === AI_ROLE && !m.content) continue; // empty placeholders
+  for (const m of visibleMessages) {
     frag.appendChild(buildMessageEl(m, chat));
   }
   msgsEl.appendChild(frag);

@@ -612,7 +612,7 @@ input, textarea { font-family: inherit; }
   margin-bottom: 6px;
   overflow: hidden;
 }
-.empty-logo img { display: block; width: 54px; height: 54px; object-fit: contain; }
+.empty-logo img { display: block; width: 84px; height: 84px; object-fit: contain; }
 .empty-state h1 { font-size: 1.7rem; font-weight: 800; letter-spacing: -0.04em; }
 .empty-sub { font-size: 1rem; color: var(--text-secondary); }
 .empty-lang { font-size: 0.86rem; color: var(--text-muted); }
