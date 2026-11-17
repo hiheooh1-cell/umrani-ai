@@ -34,36 +34,28 @@ const ADS_ENABLED = false;
 // User-requested browser credentials. Every visitor can inspect/copy these keys.
 const API_PROVIDERS = [
   {
+    name: "Google Gemini",
+    url: GEMINI_CHAT_COMPLETIONS_URL,
+    key: 'AQ.Ab8RN6Kt8ocpDoGc_XSIMC5lE2y4NVMK5EKfsikHUNI_uJwYcA',
+    models: [GEMINI_PRIMARY_MODEL, GEMINI_FALLBACK_MODEL, GEMINI_SECOND_FALLBACK_MODEL]
+  },
+{
     name: "Dahl Primary",
     url: CHAT_COMPLETIONS_URL,
     key: 'dahl_KgKuNT3JPs1oibtvFmbbmRQWgVyCX6Hcf',
     models: [PRIMARY_MODEL, FALLBACK_MODEL, SECOND_FALLBACK_MODEL]
   },
-  {
+{
     name: "Dahl Fallback 1",
     url: CHAT_COMPLETIONS_URL,
     key: 'dahl_6k8Zd85LSZsZxQaow9VNL3kXnsED4NpJF',
     models: [PRIMARY_MODEL, FALLBACK_MODEL, SECOND_FALLBACK_MODEL]
   },
-  {
+{
     name: "Dahl Fallback 2",
     url: CHAT_COMPLETIONS_URL,
     key: 'dahl_DbZarD77Pc7jFAVL7u497tcUu1pred7Fr',
     models: [PRIMARY_MODEL, FALLBACK_MODEL, SECOND_FALLBACK_MODEL]
-  },
-  {
-    // Gemini accounts: fresh AI Studio keys supplied by Fahad
-    // 2026-11-16, both verified live (HTTP 200 on all three models).
-    name: "Google Gemini",
-    url: GEMINI_CHAT_COMPLETIONS_URL,
-    key: 'AQ.Ab8RN6KrPPBE3qiu7s--cpS_O8f_eQZ4q2PRPnRxRLsl15bzyA',
-    models: [GEMINI_PRIMARY_MODEL, GEMINI_FALLBACK_MODEL, GEMINI_SECOND_FALLBACK_MODEL]
-  },
-  {
-    name: "Google Gemini 2",
-    url: GEMINI_CHAT_COMPLETIONS_URL,
-    key: 'AQ.Ab8RN6IfvQPW2GGfmWmmn8ZgRbei35U9aFkAd65CT7Elp4DKHQ',
-    models: [GEMINI_PRIMARY_MODEL, GEMINI_FALLBACK_MODEL, GEMINI_SECOND_FALLBACK_MODEL]
   }
 ];
 const SYSTEM_PROMPT = "You are Umrani AI, a smart, friendly, accurate, and professional AI assistant. Understand the user's intent, give clear and useful answers, never make up information, and admit uncertainty when necessary. Start in professional English, then respond in the same language and style the user uses. Keep answers concise by default and explain complex topics clearly.\n\nIf a user asks who created, built, or developed Umrani AI, state: **“Umrani AI was created by Fahad Umrani and Arsalan Bangulzai, who built it together.”** Mention the creators ONLY when the user asks about them; never bring up who made Umrani AI on your own in any other reply.\n\nUse Mermaid fences ONLY for valid flowcharts/structural diagrams, not mathematical function curves. For a parabola or quadratic graph, use a plot code block containing JSON: `{\"type\":\"quadratic\",\"a\":1,\"b\":0,\"c\":0,\"xMin\":-5,\"xMax\":5}`, with every JSON key and string double-quoted. The renderer computes y=a*x*x+b*x+c safely. Use the requested coefficients/range; if no equation is supplied, explicitly say you assume y=x². Do not try to express a parabola using Mermaid. For unsupported functions, explain the limitation instead of emitting invalid Mermaid. Use supplied current date and retrieved web evidence rather than claiming you have no knowledge of today.";
