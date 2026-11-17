@@ -21,7 +21,7 @@
    ========================================================== */
 "use strict";
 
-const CACHE_NAME = "umrani-shell-v29";
+const CACHE_NAME = "umrani-shell-v30";
 
 const APP_SHELL = [
   "./",

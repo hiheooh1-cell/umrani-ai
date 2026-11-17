@@ -42,22 +42,10 @@ const ADS_ENABLED = false;
 // User-requested browser credentials. Every visitor can inspect/copy these keys.
 const API_PROVIDERS = [
   {
-    name: "Google Gemini",
-    url: GEMINI_CHAT_COMPLETIONS_URL,
-    key: 'AQ.Ab8RN6Kt8ocpDoGc_XSIMC5lE2y4NVMK5EKfsikHUNI_uJwYcA',
-    models: [GEMINI_PRIMARY_MODEL, GEMINI_FALLBACK_MODEL, GEMINI_SECOND_FALLBACK_MODEL]
-  },
-  {
     name: "Pollinations Key",
     url: POLLINATIONS_CHAT_COMPLETIONS_URL,
     key: 'sk_9Mikfjy5M9X9CCh6vEAICXKuiOgpVy2H',
     models: [POLLINATIONS_PRIMARY_MODEL, POLLINATIONS_FALLBACK_MODEL]
-  },
-  {
-    name: "OpenRouter",
-    url: OPENROUTER_CHAT_COMPLETIONS_URL,
-    key: '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',
-    models: [OPENROUTER_PRIMARY_MODEL, OPENROUTER_FALLBACK_MODEL, OPENROUTER_SECOND_FALLBACK_MODEL]
   },
   {
     name: "Pollinations Free",
@@ -65,6 +53,12 @@ const API_PROVIDERS = [
     url: POLLINATIONS_CHAT_COMPLETIONS_URL,
     key: '',
     models: [POLLINATIONS_PRIMARY_MODEL, POLLINATIONS_FALLBACK_MODEL]
+  },
+  {
+    name: "OpenRouter",
+    url: OPENROUTER_CHAT_COMPLETIONS_URL,
+    key: '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',
+    models: [OPENROUTER_PRIMARY_MODEL, OPENROUTER_FALLBACK_MODEL, OPENROUTER_SECOND_FALLBACK_MODEL]
   },
 {
     name: "Dahl Primary",
@@ -1213,7 +1207,7 @@ function initAdsterraCloseButton() {
 
 
 const HIGH_LOAD_MESSAGE = "Umrani AI is under high load. Please wait.";
-const MODEL_RECHECK_INTERVAL_MS = 5 * 60 * 1000;
+const MODEL_RECHECK_INTERVAL_MS = 30 * 60 * 1000;
 const MODEL_TEST_TIMEOUT_MS = 3000;
 // Every configured model on every provider is raced in the startup
 // probe (see testModelsAndPick): all of them are tested in parallel
@@ -1224,7 +1218,7 @@ const MODEL_POOL = [PRIMARY_MODEL, FALLBACK_MODEL, SECOND_FALLBACK_MODEL];
 const GEMINI_MODEL_POOL = [GEMINI_PRIMARY_MODEL, GEMINI_FALLBACK_MODEL, GEMINI_SECOND_FALLBACK_MODEL];
 const POLLINATIONS_MODEL_POOL = [POLLINATIONS_PRIMARY_MODEL, POLLINATIONS_FALLBACK_MODEL];
 const OPENROUTER_MODEL_POOL = [OPENROUTER_PRIMARY_MODEL, OPENROUTER_FALLBACK_MODEL, OPENROUTER_SECOND_FALLBACK_MODEL];
-const ALL_MODELS = [...MODEL_POOL, ...GEMINI_MODEL_POOL, ...POLLINATIONS_MODEL_POOL, ...OPENROUTER_MODEL_POOL];
+const ALL_MODELS = [...MODEL_POOL, ...POLLINATIONS_MODEL_POOL, ...OPENROUTER_MODEL_POOL];
 const UI_MODEL_NAME = "Umrani 2.1";
 const DEEP_THINK_KEY = "umrani-deep-think";
 
@@ -1299,6 +1293,7 @@ const state = {
   activeModel: SECOND_FALLBACK_MODEL,
   modelChain: null,        // every model, fastest-first from the startup race
   modelsTested: false,
+  lastModelProbeAt: 0,
   modelTesting: false,
   stopRequested: false,
   deepThinkEnabled: false
@@ -1357,6 +1352,7 @@ async function testModelsAndPick() {
   } finally {
     state.modelTesting = false;
     state.modelsTested = true;
+    state.lastModelProbeAt = Date.now();
     hideModelLoading();
   }
 }
@@ -3438,8 +3434,21 @@ function streamCompletion(apiMessages) {
     // Stop button). For each model, its provider accounts are tried in
     // configured order — Dahl key #1 before #2 before #3, Gemini key
     // #1 before #2.
-    const chainResult = await attemptPass(modelOrder, providers);
+    let chainResult = await attemptPass(modelOrder, providers);
     if (chainResult) return chainResult;
+
+    // Every provider failed fast — the usual cause is a free-tier rate
+    // limit window (seconds long). Wait briefly and run the whole chain
+    // once more before giving up, with a fresh request budget.
+    if (!state.stopRequested && !partialContent.trim()) {
+      setStreamStatus("Retrying\u2026");
+      await new Promise((resolve) => setTimeout(resolve, 6000));
+      if (!state.stopRequested) {
+        state.requestDeadline = performance.now() + REQUEST_BUDGET_MS;
+        chainResult = await attemptPass(modelOrder, providers);
+        if (chainResult) return chainResult;
+      }
+    }
 
     if (state.stopRequested) {
       const stopped = new Error("Stopped by user.");
@@ -4006,10 +4015,11 @@ function initEventListeners() {
   // Connectivity changes are handled silently: no offline/online toasts.
   // When the connection returns, quietly re-probe the models.
   window.addEventListener("online", () => {
-    testModelsAndPick();
+    if (Date.now() - (state.lastModelProbeAt || 0) > 15 * 60 * 1000) testModelsAndPick();
   });
   document.addEventListener("visibilitychange", () => {
-    if (!document.hidden && navigator.onLine && !state.modelTesting && !state.isStreaming) {
+    if (!document.hidden && navigator.onLine && !state.modelTesting && !state.isStreaming &&
+        Date.now() - (state.lastModelProbeAt || 0) > 15 * 60 * 1000) {
       testModelsAndPick();
     }
   });
