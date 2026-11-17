@@ -5,22 +5,30 @@
 const PRIMARY_MODEL = "deepseek-ai/DeepSeek-V4-Flash-0731";
 const FALLBACK_MODEL = "zai-org/GLM-5.3-Flash";
 const SECOND_FALLBACK_MODEL = "MiniMaxAI/MiniMax-M2.7";
-// Gemini models. Together with the Dahl models above they form ONE
-// chain in FIXED provider order (v16): Dahl is Provider 1, Gemini is
-// Provider 2. At startup every model is checked on the loading screen
-// (see testModelsAndPick in main.js), but the check only records which
-// models are working — the order below never changes with speed: if a
-// Dahl model fails, the next Dahl model is tried, and chat reaches
-// Gemini only after every Dahl model has failed.
+// Gemini models. Together with the other providers' models they form
+// ONE pool that is raced at startup (see testModelsAndPick in main.js):
+// every model on every provider is tested in parallel on the loading
+// screen and chat is routed fastest-first (Fahad's order, 2026-11-17).
 const GEMINI_PRIMARY_MODEL = "gemini-3.5-flash-lite";
 const GEMINI_FALLBACK_MODEL = "gemini-3.5-flash";
 const GEMINI_SECOND_FALLBACK_MODEL = "gemini-3.6-flash";
+
+const POLLINATIONS_PRIMARY_MODEL = "openai-fast";
+const POLLINATIONS_FALLBACK_MODEL = "openai";
+
+const OPENROUTER_PRIMARY_MODEL = "openrouter/free";
+const OPENROUTER_FALLBACK_MODEL = "nvidia/nemotron-3-ultra-550b-a55b:free";
+const OPENROUTER_SECOND_FALLBACK_MODEL = "google/gemma-4-31b-it:free";
 
 // src/api/endpoints.js
 const INFERENCE_BASE_URL = "https://inference.dahl.global";
 const CHAT_COMPLETIONS_PATH = "/v1/chat/completions";
 const CHAT_COMPLETIONS_URL = INFERENCE_BASE_URL + CHAT_COMPLETIONS_PATH;
 const GEMINI_CHAT_COMPLETIONS_URL = "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions";
+
+const POLLINATIONS_CHAT_COMPLETIONS_URL = "https://text.pollinations.ai/openai/chat/completions";
+
+const OPENROUTER_CHAT_COMPLETIONS_URL = "https://openrouter.ai/api/v1/chat/completions";
 
 // src/config/config.js
 const APP_NAME = "Umrani AI";
@@ -38,6 +46,25 @@ const API_PROVIDERS = [
     url: GEMINI_CHAT_COMPLETIONS_URL,
     key: 'AQ.Ab8RN6Kt8ocpDoGc_XSIMC5lE2y4NVMK5EKfsikHUNI_uJwYcA',
     models: [GEMINI_PRIMARY_MODEL, GEMINI_FALLBACK_MODEL, GEMINI_SECOND_FALLBACK_MODEL]
+  },
+  {
+    name: "Pollinations Key",
+    url: POLLINATIONS_CHAT_COMPLETIONS_URL,
+    key: 'sk_9Mikfjy5M9X9CCh6vEAICXKuiOgpVy2H',
+    models: [POLLINATIONS_PRIMARY_MODEL, POLLINATIONS_FALLBACK_MODEL]
+  },
+  {
+    name: "OpenRouter",
+    url: OPENROUTER_CHAT_COMPLETIONS_URL,
+    key: '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',
+    models: [OPENROUTER_PRIMARY_MODEL, OPENROUTER_FALLBACK_MODEL, OPENROUTER_SECOND_FALLBACK_MODEL]
+  },
+  {
+    name: "Pollinations Free",
+    allowKeyless: true,
+    url: POLLINATIONS_CHAT_COMPLETIONS_URL,
+    key: '',
+    models: [POLLINATIONS_PRIMARY_MODEL, POLLINATIONS_FALLBACK_MODEL]
   },
 {
     name: "Dahl Primary",
@@ -1188,15 +1215,16 @@ function initAdsterraCloseButton() {
 const HIGH_LOAD_MESSAGE = "Umrani AI is under high load. Please wait.";
 const MODEL_RECHECK_INTERVAL_MS = 5 * 60 * 1000;
 const MODEL_TEST_TIMEOUT_MS = 3000;
-// Every configured model — the three Dahl models and the three Gemini
-// models — is checked in the startup probe (see testModelsAndPick), but
-// the fallback order is FIXED by provider, never by probe speed
-// (Fahad's order, v16): Provider 1 (Dahl) models are always tried first,
-// in their configured order; only when all of them fail does chat move
-// to Provider 2 (Gemini), again in configured order.
+// Every configured model on every provider is raced in the startup
+// probe (see testModelsAndPick): all of them are tested in parallel
+// and chat is routed to the FASTEST working model first, then the
+// next fastest, and so on (Fahad's order, 2026-11-17 — this replaces
+// the v16 fixed provider order).
 const MODEL_POOL = [PRIMARY_MODEL, FALLBACK_MODEL, SECOND_FALLBACK_MODEL];
 const GEMINI_MODEL_POOL = [GEMINI_PRIMARY_MODEL, GEMINI_FALLBACK_MODEL, GEMINI_SECOND_FALLBACK_MODEL];
-const ALL_MODELS = [...MODEL_POOL, ...GEMINI_MODEL_POOL];
+const POLLINATIONS_MODEL_POOL = [POLLINATIONS_PRIMARY_MODEL, POLLINATIONS_FALLBACK_MODEL];
+const OPENROUTER_MODEL_POOL = [OPENROUTER_PRIMARY_MODEL, OPENROUTER_FALLBACK_MODEL, OPENROUTER_SECOND_FALLBACK_MODEL];
+const ALL_MODELS = [...MODEL_POOL, ...GEMINI_MODEL_POOL, ...POLLINATIONS_MODEL_POOL, ...OPENROUTER_MODEL_POOL];
 const UI_MODEL_NAME = "Umrani 2.1";
 const DEEP_THINK_KEY = "umrani-deep-think";
 
@@ -1212,7 +1240,7 @@ function isProviderConfigured(provider) {
     provider &&
     typeof provider.url === "string" &&
     !provider.url.includes("YOUR_") &&
-    typeof provider.key === "string" && provider.key.length > 0 &&
+    typeof provider.key === "string" && (provider.key.length > 0 || provider.allowKeyless === true) &&
     getProviderModels(provider).length > 0
   );
 }
@@ -1269,7 +1297,7 @@ const state = {
   controller: null,        // AbortController for current request
   sharedView: null,        // a chat opened from a share link (read-only; not in IndexedDB)
   activeModel: SECOND_FALLBACK_MODEL,
-  modelChain: null,        // every model in fixed provider order (Dahl first, then Gemini)
+  modelChain: null,        // every model, fastest-first from the startup race
   modelsTested: false,
   modelTesting: false,
   stopRequested: false,
@@ -1281,14 +1309,11 @@ const state = {
 /* ---------- Model testing / auto-selection ----------
    The exact model identity is hidden from users. On startup (and on every
    page refresh, reconnect, tab return and 5-minute recheck) Umrani AI
-   checks EVERY configured model — Dahl and Gemini alike — and the first
-   check runs on the loading screen, which says what it is doing. The
-   check only records which models are working; it NEVER reorders them.
-   The fallback chain always follows the fixed provider order: all of
-   Provider 1's (Dahl) models in configured order, then Provider 2's
-   (Gemini) models. Models the latest check found working keep that
-   provider order at the front of the chain; models that did not answer
-   keep the same provider order at the end, as a last resort. */
+   checks EVERY configured model on EVERY provider in parallel — and
+   the first check runs on the loading screen. The chain is ordered by
+   measured speed: the fastest working model is routed first, then the
+   next fastest. Models that did not answer keep their configured
+   order at the end of the chain, as a last resort. */
 function showModelLoading() {
   if (!dom.modelLoadingOverlay) return;
   dom.modelLoadingOverlay.hidden = false;
@@ -1315,13 +1340,13 @@ async function testModelsAndPick() {
   if (!state.modelsTested) showModelLoading();
   try {
     const results = await Promise.all(ALL_MODELS.map((model) => probeModelTimed(model)));
-    // Promise.all preserves ALL_MODELS order, so the healthy list is
-    // already in fixed provider order — no speed sorting (v16 change).
-    const healthyModels = results.filter(Boolean).map((r) => r.model);
+    // Race result: healthy models sorted by measured probe time,
+    // fastest first (Fahad's order, 2026-11-17).
+    const healthyModels = results.filter(Boolean).sort((a, b) => a.ms - b.ms).map((r) => r.model);
     if (healthyModels.length > 0) {
-      // Working models first, in provider order. Models that did not
-      // answer the check keep their provider order at the end of the
-      // chain, so they are still tried as a last resort before a
+      // Working models first, fastest first. Models that did not
+      // answer the check keep their configured order at the end of
+      // the chain, so they are still tried as a last resort before a
       // request gives up.
       state.modelChain = [
         ...healthyModels,
@@ -3331,9 +3356,9 @@ function streamCompletion(apiMessages) {
   // model fails, the next model OF THE SAME PROVIDER is tried before
   // chat ever moves to the next provider; attemptPass only ever pairs a
   // model with a provider account that carries it, and each model's
-  // accounts are tried in configured order (Dahl key #1, #2, #3). The
-  // chain is NOT re-sorted by speed and the last successful model is
-  // NOT moved to the front — every turn starts again at Provider 1.
+  // accounts are tried in configured order. The chain itself is the
+  // startup race result — fastest working model first — and it is
+  // rebuilt on every recheck, never by which model answered last.
   // The real model IDs are never surfaced to users; only the
   // "Umrani 2.1" brand is shown.
   const providers = API_PROVIDERS.filter(isProviderConfigured);
