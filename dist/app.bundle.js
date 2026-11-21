@@ -37,7 +37,7 @@ const APP_NAME = "Umrani AI";
 // ad shell is removed from the page, and no ad break ever runs. This is a
 // code option only; there is no in-app toggle. Rebuild after changing it.
 // Shipped as false: the live deployment runs with ads off (Fahad's order).
-const ADS_ENABLED = false;
+const ADS_ENABLED = true;
 
 // User-requested browser credentials. Every visitor can inspect/copy these keys.
 const API_PROVIDERS = [
